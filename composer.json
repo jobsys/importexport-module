@@ -1,6 +1,7 @@
 {
     "name": "jobsys/importexport-module",
     "description": "",
+    "license": "MIT",
     "type": "laravel-module",
     "authors": [
         {
