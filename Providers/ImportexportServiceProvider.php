@@ -1,16 +1,16 @@
 <?php
 
-namespace Modules\ImportExport\Providers;
+namespace Modules\Importexport\Providers;
 
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Database\Eloquent\Factory;
 
-class ImportExportServiceProvider extends ServiceProvider
+class ImportexportServiceProvider extends ServiceProvider
 {
     /**
      * @var string $moduleName
      */
-    protected $moduleName = 'ImportExport';
+    protected $moduleName = 'Importexport';
 
     /**
      * @var string $moduleNameLower

@@ -1,6 +1,6 @@
 <?php
 
-namespace Modules\ImportExport\Importers;
+namespace Modules\Importexport\Importers;
 
 use App\Models\User;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -17,8 +17,8 @@ use Maatwebsite\Excel\Concerns\WithEvents;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
 use Maatwebsite\Excel\Events\AfterImport;
 use Maatwebsite\Excel\Events\BeforeImport;
-use Modules\ImportExport\Contracts\RowStore;
-use Modules\ImportExport\Services\ImportExportService;
+use Modules\Importexport\Contracts\RowStore;
+use Modules\Importexport\Services\ImportexportService;
 
 class CollectionImporter implements RowStore, ToCollection, WithEvents, SkipsEmptyRows, SkipsOnError, WithHeadingRow, ShouldQueue, WithChunkReading
 {
@@ -30,7 +30,7 @@ class CollectionImporter implements RowStore, ToCollection, WithEvents, SkipsEmp
     protected array $headers = [];
     protected array $extra = [];
     protected array $rules = [];
-    protected ImportExportService $service;
+    protected ImportexportService $service;
     protected User $imported_by;
     protected int $current_row = 1;
     protected int $error_rows = 0;
@@ -45,7 +45,7 @@ class CollectionImporter implements RowStore, ToCollection, WithEvents, SkipsEmp
         $this->headers = $headers;
         $this->extra = $extra;
         $this->imported_by = $imported_by;
-        $this->service = new ImportExportService();
+        $this->service = new ImportexportService();
         $this->file_path = $file_path;
         $this->extractRules();
 

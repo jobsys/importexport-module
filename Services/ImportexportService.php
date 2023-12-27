@@ -1,6 +1,6 @@
 <?php
 
-namespace Modules\ImportExport\Services;
+namespace Modules\Importexport\Services;
 
 
 use App\Jobs\NotifyUserOfCompletedImport;
@@ -8,10 +8,9 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Maatwebsite\Excel\HeadingRowImport;
-use Modules\ImportExport\Importers\CollectionImporter;
 use PhpOffice\PhpSpreadsheet\Shared\Date;
 
-class ImportExportService
+class ImportexportService
 {
     /**
      * 保存文件并读取文件头

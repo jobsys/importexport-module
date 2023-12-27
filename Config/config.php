@@ -1,5 +1,6 @@
 <?php
 
 return [
-    'name' => 'ImportExport'
+    'name' => 'Importexport',
+    "route_prefix" => "manager",
 ];

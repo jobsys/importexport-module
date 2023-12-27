@@ -1,16 +1,16 @@
 <?php
 
-namespace Modules\ImportExport\Http\Controllers;
+namespace Modules\Importexport\Http\Controllers;
 
 
 use App\Http\Controllers\BaseManagerController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
-use Modules\ImportExport\Services\ImportExportService;
+use Modules\Importexport\Services\ImportexportService;
 
-class ImportExportController extends BaseManagerController
+class ImportexportController extends BaseManagerController
 {
-    public function progress(Request $request, ImportExportService $service)
+    public function progress(Request $request, ImportexportService $service)
     {
         $ids = $request->input('ids');
 

@@ -1,11 +1,11 @@
 {
-    "name": "ImportExport",
+    "name": "Importexport",
     "alias": "importexport",
     "description": "",
     "keywords": [],
     "priority": 0,
     "providers": [
-        "Modules\\ImportExport\\Providers\\ImportExportServiceProvider"
+        "Modules\\Importexport\\Providers\\ImportexportServiceProvider"
     ],
     "files": []
 }

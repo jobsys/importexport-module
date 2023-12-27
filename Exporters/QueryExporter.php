@@ -1,6 +1,6 @@
 <?php
 
-namespace Modules\ImportExport\Exporters;
+namespace Modules\Importexport\Exporters;
 
 use Maatwebsite\Excel\Concerns\Exportable;
 use Maatwebsite\Excel\Concerns\FromQuery;

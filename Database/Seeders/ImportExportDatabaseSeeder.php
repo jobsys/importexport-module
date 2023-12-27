@@ -1,11 +1,11 @@
 <?php
 
-namespace Modules\ImportExport\Database\Seeders;
+namespace Modules\Importexport\Database\Seeders;
 
 use Illuminate\Database\Seeder;
 use Illuminate\Database\Eloquent\Model;
 
-class ImportExportDatabaseSeeder extends Seeder
+class ImportexportDatabaseSeeder extends Seeder
 {
     /**
      * Run the database seeds.

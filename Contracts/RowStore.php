@@ -1,6 +1,6 @@
 <?php
 
-namespace Modules\ImportExport\Contracts;
+namespace Modules\Importexport\Contracts;
 
 interface RowStore
 {
