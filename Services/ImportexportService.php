@@ -68,7 +68,7 @@ class ImportexportService
                         break;
                 }
             }
-            $result[$field['field']] = $row[$header] ?? '';
+            $result[$field['field']] = $row[$header] ?? null;
         }
         return $result;
     }

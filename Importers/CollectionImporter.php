@@ -1,6 +1,6 @@
 <?php
 
-namespace Modules\Importexport\Importers;
+namespace Modules\ImportExport\Importers;
 
 use App\Models\User;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -17,20 +17,21 @@ use Maatwebsite\Excel\Concerns\WithEvents;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
 use Maatwebsite\Excel\Events\AfterImport;
 use Maatwebsite\Excel\Events\BeforeImport;
-use Modules\Importexport\Contracts\RowStore;
-use Modules\Importexport\Services\ImportexportService;
+use Modules\ImportExport\Contracts\RowStore;
+use Modules\ImportExport\Services\ImportExportService;
 
 class CollectionImporter implements RowStore, ToCollection, WithEvents, SkipsEmptyRows, SkipsOnError, WithHeadingRow, ShouldQueue, WithChunkReading
 {
     use Importable, SkipsErrors;
 
-    protected string $id = '';
-    protected string $task_title = '';
-    protected array $fields = [];
-    protected array $headers = [];
-    protected array $extra = [];
-    protected array $rules = [];
-    protected ImportexportService $service;
+    protected string $id = ''; // 任务ID(UUID) 用于生成缓存的key
+    protected string $task_title = ''; // 任务标题
+    protected array $fields = []; // 导入字段
+    protected array $headers = []; // 表头
+    protected array $extra = []; // 额外的数据
+    protected array $rules = []; // 验证规则
+    protected array $ruleAttributes = []; // 验证规则对应的字段名称
+    protected ImportExportService $service;
     protected User $imported_by;
     protected int $current_row = 1;
     protected int $error_rows = 0;
@@ -45,7 +46,7 @@ class CollectionImporter implements RowStore, ToCollection, WithEvents, SkipsEmp
         $this->headers = $headers;
         $this->extra = $extra;
         $this->imported_by = $imported_by;
-        $this->service = new ImportexportService();
+        $this->service = new ImportExportService();
         $this->file_path = $file_path;
         $this->extractRules();
 
@@ -56,18 +57,18 @@ class CollectionImporter implements RowStore, ToCollection, WithEvents, SkipsEmp
     {
         foreach ($collection as $row) {
             cache()->forever("current_row_{$this->id}", $this->current_row);
+            $data = $this->service->tidyImportFields($this->fields, $this->headers, $row);
 
-            $validator = Validator::make($row->toArray(), $this->rules);
+            $validator = Validator::make($data, $this->rules, [], $this->ruleAttributes);
             if ($validator->fails()) {
                 $this->error_rows += 1;
                 cache()->forever("error_{$this->id}", true);
                 cache()->forever("error_rows_{$this->id}", $this->error_rows);
-
                 $this->service->importLog($this->id, $this->current_row, $validator->errors()->first());
                 $this->current_row += 1;
                 continue;
             }
-            $data = $this->service->tidyImportFields($this->fields, $this->headers, $row);
+
 
             $this->store($data, $this->extra);
             $this->current_row += 1;
@@ -116,13 +117,16 @@ class CollectionImporter implements RowStore, ToCollection, WithEvents, SkipsEmp
     private function extractRules(): void
     {
         $rules = [];
+        $ruleAttributes = [];
 
         foreach ($this->fields as $field) {
             if (isset($field['rule'])) {
-                $rules[$field['label']] = $field['rule'];
+                $rules[$field['field']] = $field['rule'];
+                $ruleAttributes[$field['field']] = $field['label'];
             }
         }
 
         $this->rules = $rules;
+        $this->ruleAttributes = $ruleAttributes;
     }
 }
