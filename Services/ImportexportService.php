@@ -20,7 +20,7 @@ class ImportexportService
     public function readHeaders(UploadedFile $file): array
     {
 
-        $path = $file->storeAs('import', $this->createFilename($file));
+        $path = $file->storeAs('import', $this->createFilename($file),  ['disk' => 'local']);
 
         if (!$path) {
             return [null, '文件上传失败'];
