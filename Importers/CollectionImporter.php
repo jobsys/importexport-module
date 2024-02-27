@@ -1,6 +1,6 @@
 <?php
 
-namespace Modules\ImportExport\Importers;
+namespace Modules\Importexport\Importers;
 
 use App\Models\User;
 use Illuminate\Contracts\Queue\ShouldQueue;
