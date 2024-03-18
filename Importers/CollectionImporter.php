@@ -17,8 +17,8 @@ use Maatwebsite\Excel\Concerns\WithEvents;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
 use Maatwebsite\Excel\Events\AfterImport;
 use Maatwebsite\Excel\Events\BeforeImport;
-use Modules\ImportExport\Contracts\RowStore;
-use Modules\ImportExport\Services\ImportExportService;
+use Modules\Importexport\Contracts\RowStore;
+use Modules\Importexport\Services\ImportexportService;
 
 class CollectionImporter implements RowStore, ToCollection, WithEvents, SkipsEmptyRows, SkipsOnError, WithHeadingRow, ShouldQueue, WithChunkReading
 {
@@ -31,7 +31,7 @@ class CollectionImporter implements RowStore, ToCollection, WithEvents, SkipsEmp
     protected array $extra = []; // 额外的数据
     protected array $rules = []; // 验证规则
     protected array $ruleAttributes = []; // 验证规则对应的字段名称
-    protected ImportExportService $service;
+    protected ImportexportService $service;
     protected User $imported_by;
     protected int $current_row = 1;
     protected int $error_rows = 0;
@@ -46,7 +46,7 @@ class CollectionImporter implements RowStore, ToCollection, WithEvents, SkipsEmp
         $this->headers = $headers;
         $this->extra = $extra;
         $this->imported_by = $imported_by;
-        $this->service = new ImportExportService();
+        $this->service = new ImportexportService();
         $this->file_path = $file_path;
         $this->extractRules();
 
