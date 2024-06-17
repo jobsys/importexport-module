@@ -8,13 +8,14 @@
 		</a-steps>
 
 		<div v-if="state.stepNum === 1">
-			<ol class="pl-6 py-4 border-solid border-left border-red-200">
+			<ol class="pl-6 py-4 border-solid border-left border-red-200 rounded-lg">
 				<li>
 					仅支持 EXCEL 文件。
 					<a v-if="templateUrl" :href="templateUrl" target="_blank">&gt;&gt;点击下载模板&lt;&lt;</a>
 				</li>
 
 				<li>请尽量确保上传数据的列名与目标数据的列名一致，系统将根据列名自动匹配。</li>
+				<li>重复数据不会多次导入</li>
 
 				<li v-for="(tip, index) in tips" :key="index">{{ tip }}</li>
 			</ol>
@@ -181,6 +182,11 @@ const openImporter = () => {
 	state.errorFile = ""
 }
 
+/**
+ * alias for openImporter
+ */
+const open = () => openImporter()
+
 const checkUploadProgressInterval = () => {
 	if (!state.checkInterval) {
 		state.checkInterval = setInterval(checkUploadProgress, 5000)
@@ -315,5 +321,5 @@ const closeImporter = () => {
 	clearCheckInterval()
 }
 
-defineExpose({ openImporter })
+defineExpose({ openImporter, open })
 </script>

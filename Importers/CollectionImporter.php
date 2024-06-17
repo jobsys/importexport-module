@@ -2,10 +2,9 @@
 
 namespace Modules\Importexport\Importers;
 
-use App\Models\User;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Maatwebsite\Excel\Concerns\Importable;
 use Maatwebsite\Excel\Concerns\SkipsEmptyRows;
@@ -18,115 +17,141 @@ use Maatwebsite\Excel\Concerns\WithHeadingRow;
 use Maatwebsite\Excel\Events\AfterImport;
 use Maatwebsite\Excel\Events\BeforeImport;
 use Modules\Importexport\Contracts\RowStore;
+use Modules\Importexport\Entities\TransferRecord;
 use Modules\Importexport\Services\ImportexportService;
 
 class CollectionImporter implements RowStore, ToCollection, WithEvents, SkipsEmptyRows, SkipsOnError, WithHeadingRow, ShouldQueue, WithChunkReading
 {
-    use Importable, SkipsErrors;
+	use Importable, SkipsErrors;
 
-    protected string $id = ''; // 任务ID(UUID) 用于生成缓存的key
-    protected string $task_title = ''; // 任务标题
-    protected array $fields = []; // 导入字段
-    protected array $headers = []; // 表头
-    protected array $extra = []; // 额外的数据
-    protected array $rules = []; // 验证规则
-    protected array $ruleAttributes = []; // 验证规则对应的字段名称
-    protected ImportexportService $service;
-    protected User $imported_by;
-    protected int $current_row = 1;
-    protected int $error_rows = 0;
+	protected string $id = ''; // 任务ID(UUID) 用于生成缓存的key
+	protected string $task_title = ''; // 任务标题
+	protected array $fields = []; // 导入字段
+	protected array $headers = []; // 表头
+	protected array $extra = []; // 额外的数据
+	protected array $rules = []; // 验证规则
+	protected array $ruleAttributes = []; // 验证规则对应的字段名称
+	protected ImportexportService $service;
+	protected int $current_row = 1;
+	protected int $error_rows = 0;
 
-    protected string $file_path = "";
+	protected string $file_path = "";
 
-    public function __construct(string $import_id, string $task_title, array $fields, array $headers, $extra = [], User $imported_by = null, $file_path = '')
-    {
-        $this->id = $import_id;
-        $this->task_title = $task_title;
-        $this->fields = $fields;
-        $this->headers = $headers;
-        $this->extra = $extra;
-        $this->imported_by = $imported_by;
-        $this->service = new ImportexportService();
-        $this->file_path = $file_path;
-        $this->extractRules();
+	public function __construct(string $import_id, string $task_title, array $fields, array $headers, $extra = [], $file_path = '')
+	{
+		$this->id = $import_id;
+		$this->task_title = $task_title;
+		$this->fields = $fields;
+		$this->headers = $headers;
+		$this->extra = $extra;
+		$this->service = new ImportexportService();
+		$this->file_path = $file_path;
+		$this->extractRules();
 
-        cache()->forever("title_{$this->id}", $this->task_title);
-    }
+		cache()->forever("title_{$this->id}", $this->task_title);
+	}
 
-    public function collection(Collection $collection): void
-    {
-        foreach ($collection as $row) {
-            cache()->forever("current_row_{$this->id}", $this->current_row);
-            $data = $this->service->tidyImportFields($this->fields, $this->headers, $row);
-
-            $validator = Validator::make($data, $this->rules, [], $this->ruleAttributes);
-            if ($validator->fails()) {
-                $this->error_rows += 1;
-                cache()->forever("error_{$this->id}", true);
-                cache()->forever("error_rows_{$this->id}", $this->error_rows);
-                $this->service->importLog($this->id, $this->current_row, $validator->errors()->first());
-                $this->current_row += 1;
-                continue;
-            }
+	public function collection(Collection $collection): void
+	{
 
 
-            $this->store($data, $this->extra);
-            $this->current_row += 1;
-        }
-    }
+		foreach ($collection as $row) {
+			cache()->forever("current_row_{$this->id}", $this->current_row);
+			$data = $this->service->tidyImportFields($this->fields, $this->headers, $row);
 
-    public function chunkSize(): int
-    {
-        return 1000;
-    }
+			$validator = Validator::make($data, $this->rules, [], $this->ruleAttributes);
+			if ($validator->fails()) {
+				$this->error_rows += 1;
+				cache()->forever("error_{$this->id}", true);
+				cache()->forever("error_rows_{$this->id}", $this->error_rows);
+				$this->service->importLog($this->id, $this->current_row, $validator->errors()->first());
+				$this->current_row += 1;
+				continue;
+			}
 
-    public function registerEvents(): array
-    {
-        return [
-            BeforeImport::class => function (BeforeImport $event) {
-                $totalRows = $event->getReader()->getTotalRows();
-                if (filled($totalRows)) {
-                    cache()->forever("total_rows_{$this->id}", array_values($totalRows)[0] - 1);
-                    cache()->forever("start_date_{$this->id}", now()->unix());
-                }
-            },
-            AfterImport::class => function (AfterImport $event) {
-                cache(["end_date_{$this->id}" => now()], now()->addMinute());
+			[$result, $error] = $this->store($data, $this->extra);
 
-                if ($this->file_path) {
-                    @unlink($this->file_path);
-                }
+			if ($error) {
+				$this->error_rows += 1;
+				cache()->forever("error_{$this->id}", true);
+				cache()->forever("error_rows_{$this->id}", $this->error_rows);
+				$this->service->importLog($this->id, $this->current_row, $error);
+			}
 
-                /* cache()->forget("total_rows_{$this->id}");
-                 cache()->forget("start_date_{$this->id}");
-                 cache()->forget("title_{$this->id}");
-                 cache()->forget("error_{$this->id}"); */
+			$this->current_row += 1;
+		}
+	}
 
-            },
-        ];
-    }
+	public function chunkSize(): int
+	{
+		return 1000;
+	}
 
-    public function store(array $row, array $extra)
-    {
-    }
+	public function registerEvents(): array
+	{
+		return [
+			BeforeImport::class => function (BeforeImport $event) {
+				$totalRows = $event->getReader()->getTotalRows();
+				if (filled($totalRows)) {
+					cache()->forever("total_rows_{$this->id}", array_values($totalRows)[0] - 2);
+					cache()->forever("start_date_{$this->id}", now()->unix());
+				}
+				TransferRecord::where('task_id', $this->id)->update([
+					'status' => TransferRecord::STATUS_PROCESSING,
+					'started_at' => Carbon::now(),
+				]);
+			},
+			AfterImport::class => function (AfterImport $event) {
+				cache()->forever("end_date_$this->id", now()->unix());
 
-    /**
-     * 抽取出字段的验证规则
-     * @return void
-     */
-    private function extractRules(): void
-    {
-        $rules = [];
-        $ruleAttributes = [];
+				TransferRecord::where('task_id', $this->id)->update([
+					'status' => TransferRecord::STATUS_DONE,
+					'ended_at' => Carbon::now(),
+					'total_count' => cache("total_rows_$this->id") ?? 0,
+					'error_file_path' => filled(cache("error_$this->id")) ? "import/$this->id.csv" : null,
+					'duration' => gmdate('H:i:s', Carbon::createFromTimestamp(cache("start_date_$this->id"))->diffInSeconds(Carbon::now())),
+				]);
+			},
+		];
+	}
 
-        foreach ($this->fields as $field) {
-            if (isset($field['rule'])) {
-                $rules[$field['field']] = $field['rule'];
-                $ruleAttributes[$field['field']] = $field['label'];
-            }
-        }
+	/**
+	 * 第一个返回值为是否成功，第二个为错误信息
+	 * @param array $row
+	 * @param array $extra
+	 * @return array
+	 */
+	public function store(array $row, array $extra): array
+	{
 
-        $this->rules = $rules;
-        $this->ruleAttributes = $ruleAttributes;
-    }
+		return [true, null];
+	}
+
+	/**
+	 * 抽取出字段的验证规则
+	 * @return void
+	 */
+	private function extractRules(): void
+	{
+		$rules = [];
+		$ruleAttributes = [];
+
+		foreach ($this->fields as $field) {
+			if (isset($field['rule'])) {
+				$rules[$field['field']] = $field['rule'];
+				$ruleAttributes[$field['field']] = $field['label'];
+			}
+		}
+
+		$this->rules = $rules;
+		$this->ruleAttributes = $ruleAttributes;
+	}
+
+	/**
+	 * @return int
+	 */
+	public function headingRow(): int
+	{
+		return 2;
+	}
 }
