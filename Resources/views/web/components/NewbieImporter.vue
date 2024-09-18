@@ -74,7 +74,9 @@
 					{{ state.progressText || (percent || 0) + "%" }}
 				</template>
 			</a-progress>
-			<div v-if="state.errorFile" class="text-left bg-gray-100 p-4 mt-4 rounded">
+			<div class="text-center text-gray-500 p-4 rounded">提示：请手动刷新页面或表格查看导入数据</div>
+
+			<div v-if="!state.errorFile" class="text-left bg-gray-100 p-4 rounded">
 				<p class="mb-0">
 					<a-tag color="red"> {{ state.errorRows }}</a-tag>
 					条异常数据
@@ -296,13 +298,13 @@ const checkUploadProgress = async () => {
 				state.errorFile = progress.error
 				state.errorRows = progress.error_rows
 			}
-			if (progress.total_rows === progress.current_row) {
+			if (progress.current_row >= progress.total_rows) {
 				state.progressPercent = 100
 				state.stepNum = 4
 				clearCheckInterval()
 				isNeedCheckInterval = false
 			} else {
-				state.progressPercent = (progress.current_row / progress.total_rows).toFixed(2) * 100
+				state.progressPercent = parseFloat(((progress.current_row / progress.total_rows) * 100).toFixed(2))
 			}
 		}
 		if (isNeedCheckInterval && !state.checkInterval) {

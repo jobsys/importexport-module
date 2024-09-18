@@ -7,6 +7,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Validator;
 use Maatwebsite\Excel\Concerns\Importable;
+use Maatwebsite\Excel\Concerns\RemembersChunkOffset;
 use Maatwebsite\Excel\Concerns\SkipsEmptyRows;
 use Maatwebsite\Excel\Concerns\SkipsErrors;
 use Maatwebsite\Excel\Concerns\SkipsOnError;
@@ -14,15 +15,16 @@ use Maatwebsite\Excel\Concerns\ToCollection;
 use Maatwebsite\Excel\Concerns\WithChunkReading;
 use Maatwebsite\Excel\Concerns\WithEvents;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
+use Maatwebsite\Excel\Concerns\WithMapping;
 use Maatwebsite\Excel\Events\AfterImport;
 use Maatwebsite\Excel\Events\BeforeImport;
 use Modules\Importexport\Contracts\RowStore;
 use Modules\Importexport\Entities\TransferRecord;
 use Modules\Importexport\Services\ImportexportService;
 
-class CollectionImporter implements RowStore, ToCollection, WithEvents, SkipsEmptyRows, SkipsOnError, WithHeadingRow, ShouldQueue, WithChunkReading
+class CollectionImporter implements RowStore, ToCollection, WithEvents, SkipsEmptyRows, SkipsOnError, WithHeadingRow, ShouldQueue, WithChunkReading, WithMapping
 {
-	use Importable, SkipsErrors;
+	use Importable, SkipsErrors, RemembersChunkOffset;
 
 	protected string $id = ''; // 任务ID(UUID) 用于生成缓存的key
 	protected string $task_title = ''; // 任务标题
@@ -54,9 +56,8 @@ class CollectionImporter implements RowStore, ToCollection, WithEvents, SkipsEmp
 	public function collection(Collection $collection): void
 	{
 
-
 		foreach ($collection as $row) {
-			cache()->forever("current_row_{$this->id}", $this->current_row);
+			cache()->forever("current_row_{$this->id}", $this->getCurrentRow());
 			$data = $this->service->tidyImportFields($this->fields, $this->headers, $row);
 
 			$validator = Validator::make($data, $this->rules, [], $this->ruleAttributes);
@@ -153,5 +154,18 @@ class CollectionImporter implements RowStore, ToCollection, WithEvents, SkipsEmp
 	public function headingRow(): int
 	{
 		return 2;
+	}
+
+	public function getCurrentRow(): ?int
+	{
+		// 因为表头2行，ChunkSize 是 1000，ChunkOffset 为 3, 1003, 2003.....
+		// $this->current_row 为当前 Chunk 中的当前处理行数，非全部数据的行数
+		//所以用 ChunkOffset  - 2行表头 + 当前处理行数 - 1 得到全部数据的行数
+		return $this->getChunkOffset() - $this->headingRow() + $this->current_row - 1;
+	}
+
+	public function map($row): array
+	{
+		return array_map('trim', $row);
 	}
 }

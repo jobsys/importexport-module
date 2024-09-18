@@ -27,10 +27,10 @@ return new class extends Migration {
 			$table->dateTime('started_at')->nullable()->comment('开始时间');
 			$table->dateTime('ended_at')->nullable()->comment('结束时间');
 			$table->string('duration')->nullable()->comment('处理时长');
-			$table->integer('approver_id')->nullable()->index()->comment('审批者ID');
-			$table->string('approval_status')->nullable()->index()->comment('审批状态');
-			$table->string('approval_comment')->nullable()->comment('审批备注');
-			$table->dateTime('approval_at')->nullable()->comment('审批时间');
+			$table->integer('approver_id')->nullable()->index()->comment('审核者ID');
+			$table->string('approval_status')->nullable()->index()->comment('审核状态');
+			$table->string('approval_comment')->nullable()->comment('审核备注');
+			$table->dateTime('approval_at')->nullable()->comment('审核时间');
 			$table->timestamps();
 		});
 	}

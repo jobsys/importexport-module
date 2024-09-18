@@ -14,6 +14,7 @@ use Modules\Approval\Enums\ApprovalStatus;
 use Modules\Approval\Services\ApprovalService;
 use Modules\Importexport\Entities\TransferRecord;
 use Modules\Importexport\Exporters\QueryExporter;
+use Modules\Importexport\Importers\CollectionImporter;
 use PhpOffice\PhpSpreadsheet\Shared\Date;
 
 class ImportexportService
@@ -147,6 +148,9 @@ class ImportexportService
 				'status' => TransferRecord::STATUS_PENDING,
 				'file_path' => $path,
 			]);
+			/**
+			 * @var CollectionImporter $importer
+			 */
 			$importer = new $importer_class($import_id, $title, $fields, $headers, $extra_data, request()->user(), $storage_path);
 			$importer->import($storage_path)->chain([
 				new NotifyUserOfCompletedImport("{$title}完成", $import_id, request()->user())
@@ -193,12 +197,12 @@ class ImportexportService
 		 */
 
 		if (!request('fields', false) && !request('task_id', false)) {
-			return $this->exportExtractHeaders($exporter_class);
+			return $this->exportExtractHeaders($exporter_class, $extra_data);
 		}
 
 		if (request()->exists('fields')) {
 			$title = $title . '_' . now()->format('Y_m_d');;
-			return $this->exportCreateTask($title, $exporter_class);
+			return $this->exportCreateTask($title, $exporter_class, $extra_data);
 		}
 
 		if ($task_id = request('task_id')) {
@@ -218,9 +222,9 @@ class ImportexportService
 	 * @param $exporter_class
 	 * @return array
 	 */
-	public function exportExtractHeaders($exporter_class): array
+	public function exportExtractHeaders($exporter_class, $extra_data = []): array
 	{
-		$exporter = app()->make($exporter_class);
+		$exporter = app()->makeWith($exporter_class, ['export_id' => '', 'record' => null, 'extra_data' => $extra_data]);
 		return [$exporter->headings(), null];
 	}
 
@@ -231,20 +235,14 @@ class ImportexportService
 	 * @param $exporter_class
 	 * @return array
 	 */
-	public function exportCreateTask($title, $exporter_class): array
+	public function exportCreateTask($title, $exporter_class, $extra_data = []): array
 	{
 		$current_user = request()->user();
 		$title = $title . '_' . now()->format('Y_m_d');;
 
 
-		$exporter = app()->make($exporter_class);
-		$approval_type = $exporter->getApprovalType();
-
 		//是否需要审核
-		$should_approve = true;
-		if (!$approval_type || !isset(config('approval.approval_types')[$approval_type]) || $current_user->isSuperAdmin()) {
-			$should_approve = false;
-		}
+		$should_approve = in_array(TransferRecord::class, collect(config('approval.approvables'))->firstWhere('slug', 'transfer-record')['children'] ?? []);
 
 		$export_id = uuid_create();
 
@@ -263,8 +261,8 @@ class ImportexportService
 		]);
 
 		if ($should_approve) {
-			$approvalService = new ApprovalService();
-			list($result, $error) = $approvalService->createApprovalTask($record, config('approval.approval_types')[$approval_type]);
+			$approvalService = app()->make(ApprovalService::class);
+			list($result, $error) = $approvalService->createApprovalTask($record);
 			if ($error) {
 				return [null, $error];
 			}
@@ -310,7 +308,7 @@ class ImportexportService
 
 		$exporter_class = $record->class_name;
 
-		$exporter = new $exporter_class($task_id, $record, $extra_data);
+		$exporter = app()->makeWith($exporter_class, ['export_id' => $task_id, 'record' => $record, 'extra_data' => $extra_data]);
 
 		$file_name = $this->exportCreateFileName($record->task_name);
 

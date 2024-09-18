@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Maatwebsite\Excel\Concerns\Exportable;
 use Maatwebsite\Excel\Concerns\FromQuery;
 use Maatwebsite\Excel\Concerns\ShouldAutoSize;
-use Maatwebsite\Excel\Concerns\WithColumnFormatting;
+use Maatwebsite\Excel\Concerns\WithCustomValueBinder;
 use Maatwebsite\Excel\Concerns\WithHeadings;
 use Maatwebsite\Excel\Concerns\WithMapping;
 use Maatwebsite\Excel\Concerns\WithStyles;
@@ -14,13 +14,14 @@ use Modules\Importexport\Contracts\ExportMappings;
 use Modules\Importexport\Contracts\PrepareQuery;
 use Modules\Importexport\Entities\TransferRecord;
 use Modules\Starter\Entities\BaseModel;
+use PhpOffice\PhpSpreadsheet\Cell\Cell;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
+use PhpOffice\PhpSpreadsheet\Cell\DefaultValueBinder;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
-class QueryExporter implements FromQuery, WithHeadings, WithMapping, ShouldAutoSize, WithStyles, ExportMappings, PrepareQuery, WithColumnFormatting
+class QueryExporter extends DefaultValueBinder implements FromQuery, WithHeadings, WithMapping, ShouldAutoSize, WithStyles, ExportMappings, PrepareQuery, WithCustomValueBinder
 {
 	use Exportable;
-
-	protected string $approval_type = ''; //审核类型
 
 	protected string $id = '';
 	protected ?string $task_title = ''; // 任务标题
@@ -29,6 +30,8 @@ class QueryExporter implements FromQuery, WithHeadings, WithMapping, ShouldAutoS
 	protected array $params = []; // 额外的数据
 	protected array $fields = []; // 导出字段
 	protected string $mode = ''; //导出模式
+
+	protected int $index = 0; //当前行号
 
 	public function __construct(string $export_id = '', ?TransferRecord $record = null, array $extra_data = [])
 	{
@@ -39,11 +42,6 @@ class QueryExporter implements FromQuery, WithHeadings, WithMapping, ShouldAutoS
 		$this->params = $task_properties['params'] ?? [];
 		$this->mode = $task_properties['mode'] ?? '';
 		$this->extra_data = $extra_data;
-	}
-
-	public function getApprovalType(): string
-	{
-		return $this->approval_type;
 	}
 
 	/**
@@ -82,9 +80,8 @@ class QueryExporter implements FromQuery, WithHeadings, WithMapping, ShouldAutoS
 	 */
 	public function map($row): array
 	{
-		return collect($this->headings())->map(function ($key) use ($row) {
-			return $this->mappings($row)[$key] ?? null;
-		})->toArray();
+		$this->index += 1;
+		return collect($this->headings())->map(fn($key) => $this->mappings($row)[$key] ?? null)->toArray();
 	}
 
 
@@ -96,17 +93,6 @@ class QueryExporter implements FromQuery, WithHeadings, WithMapping, ShouldAutoS
 	public function mappings($row): array
 	{
 		return [];
-	}
-
-	/**
-	 * 单元格格式化
-	 * @return array
-	 */
-	public function columnFormats(): array
-	{
-		return [
-			//'B' => NumberFormat::FORMAT_TEXT
-		];
 	}
 
 	/**
@@ -124,6 +110,23 @@ class QueryExporter implements FromQuery, WithHeadings, WithMapping, ShouldAutoS
 				],
 			],
 		];
+	}
+
+	public function bindValue(Cell $cell, $value): bool
+	{
+
+		$mapping = method_exists($this, 'formats') ? $this->formats() : [];
+
+		$headings = collect($this->headings());
+		foreach ($mapping as $key => $format) {
+			$column = Coordinate::stringFromColumnIndex($headings->search($key) + 1);
+			if ($column === $cell->getColumn()) {
+				$cell->setValueExplicit($value, $format);
+				return true;
+			}
+		}
+		// else return default behavior
+		return parent::bindValue($cell, $value);
 	}
 
 
