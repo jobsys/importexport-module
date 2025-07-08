@@ -1,7 +1,9 @@
 # **Importexport** 导入导出模块
+
 该模板主要功能是基于 Excel 进行数据的导入导出。
 
 !> 该模板的`数据导入`功能为异步执行，依赖于 [Laravel 队列](https://laravel.com/docs/10.x/queues)，请确保后台已经正确开起了队列命令。
+
 ```bash
 # 该命令需长驻后台，可使用 supervisor 进行管理，在导入逻辑有变化后，需要重启该命令
 php artisan queue:work 
@@ -42,21 +44,19 @@ php artisan vendor:publish --provider="Maatwebsite\Excel\ExcelServiceProvider" -
 
 > 具体配置查看 [Laravel Excel](https://docs.laravel-excel.com/3.1/getting-started/)
 
-
-
 ## 模块功能
 
 ### 数据导入
 
 数据导入由 `NewbieImporter` 组件负责前端的上传、字段对应、进度显示等功能，并结合 `ImportexportService` 提供的 API 进行数据的导入。
 
-
 #### 开发规范
 
-1. 在 `Controller` 中定义本次导入的字段，每个字段有 4 个属性分别为 `field` 接收并存储的字段名，`label` 字段的名称，`rule` 字段的验证规则。
+1. 在 `Controller` 中定义本次导入的字段，每个字段有 4 个属性分别为 `field` 接收并存储的字段名，`label` 字段的名称，`rule`
+   字段的验证规则。
 
    | 属性 | 类型 | 说明                                                                                                            |
-       | --- | --- |---------------------------------------------------------------------------------------------------------------|
+                | --- | --- |---------------------------------------------------------------------------------------------------------------|
    | field | string | 接收并存储的字段名                                                                                                     |
    | label | string | 字段的名称                                                                                                         |
    | rule | string | 字段的验证规则，规则与 [Laravel Form Validation](https://laravel.com/docs/10.x/validation#available-validation-rules) 一致 |
@@ -71,16 +71,18 @@ php artisan vendor:publish --provider="Maatwebsite\Excel\ExcelServiceProvider" -
     ];
    
     // 附属数据，将在后续的 Importer 中一并处理
-    $extra_data = ['creator_id' => $this->login_user_id];
+    $extra_data = ['creator_id' => auth()->id()];
    
     // 调用 ImportexportService 的 import 方法进行数据导入
     list($result, $error) = $service->import('学员信息导入', StudentImporter::class, $fields, $extra_data);
  
     ```
 
-2. 在页面引入 `NewbieImporter` 组件，其中 `url` 属性为上一步中的 API，`progress-url` 由本模块提供的默认路由，`extra-data` 可以定义一些其它的附属属性，并可以将其与上传的数据一并发送到 Controller。
+2. 在页面引入 `NewbieImporter` 组件，其中 `url` 属性为上一步中的 API，`progress-url` 由本模块提供的默认路由，`extra-data`
+   可以定义一些其它的附属属性，并可以将其与上传的数据一并发送到 Controller。
 
-   > 组件属性 `extra-data` 与上一步中的 `extra_data` 不是同一个属性，组件中的 `$extra-data` 仅会在上传时一并发送到 Controller，而上一步中的 `$extra_data` 会在 Importer 的 `store` 方法中一并处理。
+   > 组件属性 `extra-data` 与上一步中的 `extra_data` 不是同一个属性，组件中的 `$extra-data` 仅会在上传时一并发送到
+   Controller，而上一步中的 `$extra_data` 会在 Importer 的 `store` 方法中一并处理。
 
     ```js
     import NewbieImporter from "@modules/Importexport/Resources/views/web/components/NewbieImporter.vue"
@@ -94,16 +96,17 @@ php artisan vendor:publish --provider="Maatwebsite\Excel\ExcelServiceProvider" -
 			ref="studentImporter"
 			:url="route('api.manager.course.student.import')"
 			template-url="/templates/student-import-template.xlsx"
-			:progress-url="route('api.manager.import-export.progress')"
+			:progress-url="route('api.manager.import-export.import.progress')"
 			:tips="['模板中红色字段为必填项']"
 			:extra-data="{ course_id: course.id }"
 	/>
     ```
 
-3. 处理并存储数据，在 `app\Importer` 中定义一个 `Importer` 类，该类继承于 `Modules\Importexport\Importers\CollectionImporter`，重写该类的 `store` 方法，该方法有两个参数 `$row` 和 `$extra_data`
+3. 处理并存储数据，在 `app\Importer` 中定义一个 `Importer` 类，该类继承于
+   `Modules\Importexport\Importers\CollectionImporter`，重写该类的 `store` 方法，该方法有两个参数 `$row` 和 `$extra_data`
 
    | 参数 | 类型 | 说明|
-       | --- | --- |------------------------|
+                | --- | --- |------------------------|
    | $row | array | Excel 文件上传的一行数据|
    | $extra_data | array | 附属数据 |
 
@@ -115,12 +118,13 @@ php artisan vendor:publish --provider="Maatwebsite\Excel\ExcelServiceProvider" -
     }
     ```
 
-
 ### 数据导出
 
-使用 `Laravel Excel` 提供的 `Excel` 类进行数据的导出，具体使用方法参考 [Laravel Excel](https://docs.laravel-excel.com/3.1/exports/)
+使用 `Laravel Excel` 提供的 `Excel`
+类进行数据的导出，具体使用方法参考 [Laravel Excel](https://docs.laravel-excel.com/3.1/exports/)
 
 #### 开发规范
+
 1. 在 `app\Exporters` 中定义一个 `Exporter` 类，参考如下：
 
     ```php
@@ -168,11 +172,7 @@ php artisan vendor:publish --provider="Maatwebsite\Excel\ExcelServiceProvider" -
     }
     ```
 
-
 ## 模块代码
-
-
-
 
 ### Controller
 
@@ -180,9 +180,7 @@ php artisan vendor:publish --provider="Maatwebsite\Excel\ExcelServiceProvider" -
 Modules\Importexport\Http\Controllers\ImportexportController       # 提供导入进度查询接口s
 ```
 
-
 ### UI
-
 
 #### PC 组件
 
@@ -194,7 +192,7 @@ web/components/NewbieImporter.vue        # 导入组件
 
 + **`ImportexportService`**
 
-    - `readHeaders` 将上传的文件进行存储并读取 Excel 文件的表头
+	- `readHeaders` 将上传的文件进行存储并读取 Excel 文件的表头
 
     ```php
       /**
@@ -205,7 +203,7 @@ web/components/NewbieImporter.vue        # 导入组件
         public function readHeaders(UploadedFile $file): array
     ```
 
-    - `import` 导入数据
+	- `import` 导入数据
 
     ```php
       /**

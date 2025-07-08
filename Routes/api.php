@@ -11,13 +11,12 @@
 |
 */
 
-$route_prefix = config('importexport.route_prefix', 'manager');
-$route_url_prefix = $route_prefix ? $route_prefix . '/' : '';
-$route_name_prefix = $route_prefix ? $route_prefix . '.' : '';
+use Modules\Importexport\Http\Controllers\ImportexportController;
 
-Route::prefix("{$route_url_prefix}import-export")->name("api.{$route_name_prefix}import-export.")->group(function () {
-	Route::get('/record', 'ImportexportController@items')->name('items');
-	Route::get('/record/approve', 'ImportexportController@approveItem')->name('item.approve');
-	Route::post('/download', 'ImportexportController@download')->name('download');
-	Route::post('/status', "ImportexportController@progress")->name('progress');
+Route::prefix("manager/import-export")->name("api.manager.import-export.")->group(function () {
+	Route::get('/record', [ImportexportController::class, 'items'])->name('items');
+	Route::get('/record/approve', [ImportexportController::class, 'approveItem'])->name('item.approve');
+	Route::post('/download', [ImportexportController::class, 'download'])->name('download');
+	Route::post('/import-progress', [ImportexportController::class, 'importProgress'])->name('import.progress');
+	Route::post('/export-progress', [ImportexportController::class, 'exportProgress'])->name('export.progress');
 });

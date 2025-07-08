@@ -1,6 +1,6 @@
 <template>
-	<a-modal v-model:open="state.visible" :title="title" :width="700" :mask-closable="false" :footer="null" @cancel="closeExporter">
-		<a-steps :current="state.stepNum - 1" size="small" class="my-6">
+	<a-modal v-model:open="state.visible" :title="title" :width="width" :mask-closable="false" :footer="null" @cancel="closeExporter">
+		<a-steps :current="state.stepNum - 1" size="small" class="my-6!">
 			<a-step title="选择数据" />
 			<a-step title="定制字段" />
 			<a-step title="导出审核" />
@@ -13,7 +13,7 @@
 			</ol>
 			<a-divider>请选择导出数据范围</a-divider>
 			<div class="flex justify-center">
-				<a-radio-group v-model:value="state.selectedMode" button-style="solid" class="mt-5 mb-20">
+				<a-radio-group v-model:value="state.selectedMode" button-style="solid" class="mt-5! mb-20!">
 					<a-tooltip
 						v-if="availableModes.includes('query')"
 						:open="state.selectedMode === 'query'"
@@ -39,7 +39,7 @@
 					</a-tooltip>
 					<a-tooltip :open="state.selectedMode === 'all'" placement="bottomRight">
 						<template #title>
-							<div>导出该业务所有数据 <br />数据量太大时有超时风险，谨慎使用</div>
+							<div>导出该业务所有数据</div>
 						</template>
 						<a-radio-button value="all">
 							<DatabaseOutlined class="mr-2"></DatabaseOutlined>
@@ -49,33 +49,33 @@
 				</a-radio-group>
 			</div>
 			<div class="flex justify-center">
-				<a-button type="primary" class="my-3" :loading="state.isLoadingNext.loading" @click="nextStep"> 下一步 </a-button>
+				<a-button type="primary" class="my-3!" :loading="state.isLoadingNext.loading" @click="nextStep"> 下一步 </a-button>
 			</div>
 		</div>
 
 		<div v-if="state.stepNum === 2" class="mt-5">
-			<div class="bg-gray-50 p-4 rounded">
-				<a-checkbox class="mt-4" v-model:checked="state.checkAll" :indeterminate="state.indeterminate" @change="onCheckAllChange">
+			<div class="bg-gray-50 p-4! rounded">
+				<a-checkbox class="mt-4!" v-model:checked="state.checkAll" :indeterminate="state.indeterminate" @change="onCheckAllChange">
 					<span class="font-bold">全选</span>
 				</a-checkbox>
 				<a-divider></a-divider>
 
 				<a-checkbox-group v-model:value="state.checkedFields" class="w-full">
 					<a-row :gutter="15">
-						<a-col :span="6" v-for="(field, index) in state.fields" :key="index" class="mb-3">
+						<a-col :span="6" v-for="(field, index) in state.fields" :key="index" class="mb-3! exporter-checkbox-col">
 							<a-checkbox :value="field">{{ field }}</a-checkbox>
 						</a-col>
 					</a-row>
 				</a-checkbox-group>
 			</div>
-			<div class="text-center mt-6 mb-3">
+			<div class="text-center mt-6! mb-3!">
 				<a-button @click="() => (state.stepNum -= 1)">上一步</a-button>
 				<a-button type="primary" class="ml-2" :loading="state.isLoadingNext.loading" @click="nextStep"> 提交审核 </a-button>
 			</div>
 		</div>
 
 		<div v-if="state.stepNum === 3">
-			<div class="text-center mt-6 mb-3">
+			<div class="text-center mt-6! mb-3!">
 				<div v-if="state.approvalStatus === 'pending'">
 					<a-alert message="导出任务审核中" type="info" show-icon>
 						<template #description>
@@ -87,15 +87,17 @@
 				</div>
 				<div v-if="state.approvalStatus === 'approved'">
 					<a-alert message="导出任务审核通过" type="success" show-icon>
-						<template #description>
-							可以点击下方按钮下载导出文件，也可以后续在
-							<Link :href="route('page.manager.tool.data-transfer')">系统工具 - 数据传输</Link>
-							中进行下载
-						</template>
+						<template #description> 点击下方下载按钮下载文件</template>
 					</a-alert>
-					<div class="text-center mt-6 mb-3">
+					<div class="text-center mt-6! mb-3!">
 						<a-button @click="() => (state.visible = false)">关闭</a-button>
 						<a-button type="primary" class="ml-2 mt-5" :loading="state.isLoadingNext.loading" @click="nextStep"> 下载文件 </a-button>
+
+						<p class="mt-4 text-gray-500">
+							若数据量较大，或请求超时出错，可在
+							<Link :href="route('page.manager.tool.data-transfer')">系统工具 - 数据传输</Link>
+							中查看进度，并于任务完成后下载文件
+						</p>
 					</div>
 				</div>
 			</div>
@@ -111,6 +113,10 @@ import { clone, isString } from "lodash-es"
 import { Link } from "@inertiajs/vue3"
 
 const props = defineProps({
+	width: {
+		type: Number,
+		default: 700,
+	},
 	url: {
 		// 上传URL
 		type: [String, Object],
@@ -137,9 +143,14 @@ const props = defineProps({
 		default: () => null,
 	},
 	modes: {
-		// 导出模式
+		// 表格实例
 		type: [Array, String],
 		default: () => ["query", "selection", "page", "all"],
+	},
+	defaultFields: {
+		// 导出默认字段
+		type: Array,
+		default: () => [],
 	},
 })
 
@@ -167,13 +178,9 @@ const availableModes = computed(() => {
 	return modes.filter((mode) => ["query", "selection", "page", "all"].includes(mode))
 })
 
-const selectionRows = computed(() => {
-	return props.tableRef ? props.tableRef.getSelection() : []
-})
+const selectionRows = computed(() => (props.tableRef ? props.tableRef.getSelection() : []))
 
-const isTableEmpty = computed(() => {
-	return props.tableRef ? !props.tableRef.getPagination()?.totalSize : true
-})
+const isTableEmpty = computed(() => (props.tableRef ? !props.tableRef.getPagination()?.totalSize : true))
 
 watch(
 	() => state.checkedFields,
@@ -205,7 +212,7 @@ const nextStep = async () => {
 
 		useProcessStatusSuccess(res, () => {
 			state.fields = res.result
-			state.checkedFields = res.result
+			state.checkedFields = props.defaultFields?.length ? props.defaultFields : res.result
 			state.stepNum = 2
 		})
 		return
@@ -223,9 +230,11 @@ const nextStep = async () => {
 			delete params.page
 			delete params.page_size
 		} else if (state.selectedMode === "selection") {
-			params = selectionRows.value.map((row) => row.id)
+			const rowKey = props.tableRef?.$props.rowKey
+			params = selectionRows.value.map((row) => row[rowKey])
 		} else if (state.selectedMode === "page") {
-			params = props.tableRef?.getData().map((row) => row.id)
+			const rowKey = props.tableRef?.$props.rowKey
+			params = props.tableRef?.getData().map((row) => row[rowKey])
 		} else if (state.selectedMode === "all") {
 			params = null
 		} else {
@@ -265,3 +274,11 @@ const closeExporter = () => {
 
 defineExpose({ openExporter, open })
 </script>
+
+<style lang="less" scoped>
+.exporter-checkbox-col {
+	.ant-checkbox-wrapper {
+		white-space: break-spaces;
+	}
+}
+</style>

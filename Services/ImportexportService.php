@@ -19,6 +19,36 @@ use PhpOffice\PhpSpreadsheet\Shared\Date;
 
 class ImportexportService
 {
+
+
+	/**
+	 * 检测模板文件是否符合要求
+	 * @param UploadedFile $file
+	 * @return bool
+	 */
+	public function checkTemplate(UploadedFile $file): bool
+	{
+		// 读取文件第一个单元格内容
+		$path = $file->storeAs('import', $this->createFilename($file), ['disk' => 'private']);
+
+		if (!$path) {
+			return false;
+		}
+
+		//第一行标题与注意问题
+		$headings = (new HeadingRowImport(1))->toArray($this->getFileStoragePath($path));
+		$first_cell = $headings[0][0][0] ?? null;
+
+		if (!$first_cell) {
+			return false;
+		}
+
+		if (config('conf.system_name')) {
+			return Str::contains(trim($first_cell), config('conf.system_name'));
+		}
+		return Str::contains(trim($first_cell), '导入模板');
+	}
+
 	/**
 	 * 保存文件并读取文件头
 	 * @param UploadedFile $file
@@ -128,6 +158,10 @@ class ImportexportService
 		$headers = request()->input('headers');
 
 		if ($file) {
+			if (!$this->checkTemplate($file)) {
+				return [null, '文件模板不符合要求，请下载导入模板并重新上传'];
+			}
+
 			list($result, $error) = $this->readHeaders($file);
 			if ($error) {
 				return [null, $error];
@@ -178,6 +212,18 @@ class ImportexportService
 		];
 	}
 
+	public function getExportProgress($task_id): array
+	{
+		return [
+			'title' => cache("title_$task_id"),
+			'started' => cache("start_date_$task_id"),
+			'finished' => cache("end_date_$task_id"),
+			'current_row' => (int)cache("current_row_$task_id"),
+			'total_rows' => (int)cache("total_rows_$task_id"),
+		];
+	}
+
+
 	/**
 	 * 导出数据
 	 * @param string $title
@@ -201,7 +247,6 @@ class ImportexportService
 		}
 
 		if (request()->exists('fields')) {
-			$title = $title . '_' . now()->format('Y_m_d');;
 			return $this->exportCreateTask($title, $exporter_class, $extra_data);
 		}
 
@@ -224,7 +269,7 @@ class ImportexportService
 	 */
 	public function exportExtractHeaders($exporter_class, $extra_data = []): array
 	{
-		$exporter = app()->makeWith($exporter_class, ['export_id' => '', 'record' => null, 'extra_data' => $extra_data]);
+		$exporter = app($exporter_class, ['export_id' => '', 'record' => null, 'extra_data' => $extra_data]);
 		return [$exporter->headings(), null];
 	}
 
@@ -238,7 +283,7 @@ class ImportexportService
 	public function exportCreateTask($title, $exporter_class, $extra_data = []): array
 	{
 		$current_user = request()->user();
-		$title = $title . '_' . now()->format('Y_m_d');;
+		$title = $title . '_' . now()->format('Ymdhi');;
 
 
 		//是否需要审核
@@ -304,27 +349,19 @@ class ImportexportService
 			return [$record->file_path, null];
 		}
 
+		$file_name = $this->exportCreateFileName($record->task_name);
+		$file_path = "export/{$file_name}";
 		$record->started_at = now();
+		$record->file_path = $file_path;
 
 		$exporter_class = $record->class_name;
 
-		$exporter = app()->makeWith($exporter_class, ['export_id' => $task_id, 'record' => $record, 'extra_data' => $extra_data]);
+		/**
+		 * @var QueryExporter $exporter
+		 */
+		$exporter = app($exporter_class, ['export_id' => $task_id, 'record' => $record, 'extra_data' => $extra_data]);
 
-		$file_name = $this->exportCreateFileName($record->task_name);
-
-		$file_path = "export/{$file_name}";
-
-		$store_result = $exporter->store($file_path, 'private');
-
-		if ($store_result) {
-			$record->status = TransferRecord::STATUS_DONE;
-			$record->file_path = $file_path;
-			$record->ended_at = now();
-			$record->duration = gmdate('H:i:s', now()->diffInSeconds($record->started_at));
-			$record->save();
-		} else {
-			return [null, '导出失败'];
-		}
+		$exporter->store($file_path, 'private');
 
 		return [$file_path, null];
 	}

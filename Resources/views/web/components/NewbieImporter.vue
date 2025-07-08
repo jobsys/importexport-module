@@ -1,6 +1,6 @@
 <template>
 	<a-modal v-model:open="state.visible" :title="title" :width="700" :mask-closable="false" :footer="null" @cancel="closeImporter">
-		<a-steps :current="state.stepNum - 1" size="small" class="my-6">
+		<a-steps :current="state.stepNum - 1" size="small" class="my-6!">
 			<a-step title="上传文件" />
 			<a-step title="设置匹配规则" />
 			<a-step title="正在导入" />
@@ -11,7 +11,15 @@
 			<ol class="pl-6 py-4 border-solid border-left border-red-200 rounded-lg">
 				<li>
 					仅支持 EXCEL 文件。
-					<a v-if="templateUrl" :href="templateUrl" target="_blank">&gt;&gt;点击下载模板&lt;&lt;</a>
+					<a
+						class="text-white! transition-all ease-in-out duration-300 font-bold inline-block py-1 px-4 shadow-lg: rounded bg-orange-500! border-2 border-orange-500! hover:bg-white! hover:text-orange-500!"
+						v-if="templateUrl"
+						:href="uncachedTemplateUrl"
+						target="_blank"
+					>
+						<DownloadOutlined class="mr-1" />
+						点击下载导入模板
+					</a>
 				</li>
 
 				<li>请尽量确保上传数据的列名与目标数据的列名一致，系统将根据列名自动匹配。</li>
@@ -25,6 +33,7 @@
 					name="file"
 					:data="extraData"
 					:action="state.prepareUrl"
+					accept=".xls,.xlsx"
 					@change="uploadSuccessHandler"
 				>
 					<div class="p-5">
@@ -47,7 +56,7 @@
 					<a-select
 						v-if="column.dataIndex === 'value'"
 						v-model:value="record.value"
-						class="w-[100px]"
+						class="w-[150px]"
 						:options="state.tableOptions"
 						allow-clear
 						size="small"
@@ -76,7 +85,7 @@
 			</a-progress>
 			<div class="text-center text-gray-500 p-4 rounded">提示：请手动刷新页面或表格查看导入数据</div>
 
-			<div v-if="!state.errorFile" class="text-left bg-gray-100 p-4 rounded">
+			<div v-if="state.errorFile" class="text-left bg-gray-100 p-4 rounded">
 				<p class="mb-0">
 					<a-tag color="red"> {{ state.errorRows }}</a-tag>
 					条异常数据
@@ -88,8 +97,8 @@
 	</a-modal>
 </template>
 <script setup>
-import { h, reactive } from "vue"
-import { CloudUploadOutlined } from "@ant-design/icons-vue"
+import { computed, h, reactive } from "vue"
+import { CloudUploadOutlined, DownloadOutlined } from "@ant-design/icons-vue"
 import { message, Tag } from "ant-design-vue"
 import { STATUS, useFetch, useProcessStatusSuccess } from "jobsys-newbie/hooks"
 import { isObject } from "lodash-es"
@@ -152,20 +161,29 @@ const state = reactive({
 		{
 			title: "系统数据项",
 			dataIndex: "field",
+			width: 150,
 		},
 		{
 			title: "是否必填",
 			width: 100,
 			key: "required",
-			customRender: ({ record }) => {
-				return record.required ? h(Tag, { color: "red" }, { default: () => "是" }) : h(Tag, { type: "default" }, { default: () => "否" })
-			},
+			customRender: ({ record }) =>
+				record.required ? h(Tag, { color: "red" }, { default: () => "是" }) : h(Tag, { type: "default" }, { default: () => "否" }),
 		},
 		{
 			title: "上传数据项",
 			dataIndex: "value",
+			width: 150,
 		},
 	],
+})
+
+// 防止模板缓存
+const uncachedTemplateUrl = computed(() => {
+	if (!props.templateUrl) {
+		return ""
+	}
+	return `${props.templateUrl}?t=${new Date().getTime()}`
 })
 
 const openImporter = () => {
@@ -247,19 +265,15 @@ const uploadSuccessHandler = ({ file, fileList }) => {
 		const { result } = file.response
 		state.uploadFileName = result.path
 		nextStep()
-		state.mappingTable = result.fields.map((field) => {
-			return {
-				field: field[0],
-				required: field[1],
-				value: result.headers.indexOf(field[0]) === -1 ? "" : field[0],
-			}
-		})
-		state.tableOptions = result.headers.map((item) => {
-			return {
-				value: item,
-				label: item,
-			}
-		})
+		state.mappingTable = result.fields.map((field) => ({
+			field: field[0],
+			required: field[1],
+			value: result.headers.indexOf(field[0]) === -1 ? "" : field[0],
+		}))
+		state.tableOptions = result.headers.map((item) => ({
+			value: item,
+			label: item,
+		}))
 		fileList = []
 	}
 	state.fileList = fileList

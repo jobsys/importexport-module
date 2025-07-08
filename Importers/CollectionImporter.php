@@ -17,7 +17,7 @@ use Maatwebsite\Excel\Concerns\WithEvents;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
 use Maatwebsite\Excel\Concerns\WithMapping;
 use Maatwebsite\Excel\Events\AfterImport;
-use Maatwebsite\Excel\Events\BeforeImport;
+use Maatwebsite\Excel\Events\BeforeSheet;
 use Modules\Importexport\Contracts\RowStore;
 use Modules\Importexport\Entities\TransferRecord;
 use Modules\Importexport\Services\ImportexportService;
@@ -34,7 +34,7 @@ class CollectionImporter implements RowStore, ToCollection, WithEvents, SkipsEmp
 	protected array $rules = []; // 验证规则
 	protected array $ruleAttributes = []; // 验证规则对应的字段名称
 	protected ImportexportService $service;
-	protected int $current_row = 1;
+	protected int $current_chunk_row = 1; //当前 Chunk 中的当前处理行数，非全部数据的行数
 	protected int $error_rows = 0;
 
 	protected string $file_path = "";
@@ -56,8 +56,11 @@ class CollectionImporter implements RowStore, ToCollection, WithEvents, SkipsEmp
 	public function collection(Collection $collection): void
 	{
 
+
 		foreach ($collection as $row) {
-			cache()->forever("current_row_{$this->id}", $this->getCurrentRow());
+			$current_row = $this->getCurrentRow();
+			$current_display_row = $this->getDisplayCurrentRow();
+			cache()->forever("current_row_{$this->id}", $current_row);
 			$data = $this->service->tidyImportFields($this->fields, $this->headers, $row);
 
 			$validator = Validator::make($data, $this->rules, [], $this->ruleAttributes);
@@ -65,8 +68,8 @@ class CollectionImporter implements RowStore, ToCollection, WithEvents, SkipsEmp
 				$this->error_rows += 1;
 				cache()->forever("error_{$this->id}", true);
 				cache()->forever("error_rows_{$this->id}", $this->error_rows);
-				$this->service->importLog($this->id, $this->current_row, $validator->errors()->first());
-				$this->current_row += 1;
+				$this->service->importLog($this->id, $current_display_row, $validator->errors()->first());
+				$this->current_chunk_row += 1;
 				continue;
 			}
 
@@ -76,10 +79,10 @@ class CollectionImporter implements RowStore, ToCollection, WithEvents, SkipsEmp
 				$this->error_rows += 1;
 				cache()->forever("error_{$this->id}", true);
 				cache()->forever("error_rows_{$this->id}", $this->error_rows);
-				$this->service->importLog($this->id, $this->current_row, $error);
+				$this->service->importLog($this->id, $current_display_row, $error);
 			}
 
-			$this->current_row += 1;
+			$this->current_chunk_row += 1;
 		}
 	}
 
@@ -91,12 +94,20 @@ class CollectionImporter implements RowStore, ToCollection, WithEvents, SkipsEmp
 	public function registerEvents(): array
 	{
 		return [
-			BeforeImport::class => function (BeforeImport $event) {
-				$totalRows = $event->getReader()->getTotalRows();
-				if (filled($totalRows)) {
-					cache()->forever("total_rows_{$this->id}", array_values($totalRows)[0] - 2);
-					cache()->forever("start_date_{$this->id}", now()->unix());
+			BeforeSheet::class => function (BeforeSheet $event) {
+				$worksheet = $event->getSheet();
+				$highest_row = $worksheet->getHighestRow();
+				$non_empty_rows = 0;
+				for ($row = 0; $row <= $highest_row; $row++) {
+					$value = $worksheet->getCell("A{$row}")->getValue();
+					if (!is_null($value) && trim((string)$value) !== '') {
+						$non_empty_rows++;
+					}
 				}
+
+				cache()->forever("total_rows_{$this->id}", $non_empty_rows - $this->headingRow());
+				cache()->forever("start_date_{$this->id}", now()->unix());
+
 				TransferRecord::where('task_id', $this->id)->update([
 					'status' => TransferRecord::STATUS_PROCESSING,
 					'started_at' => Carbon::now(),
@@ -156,12 +167,25 @@ class CollectionImporter implements RowStore, ToCollection, WithEvents, SkipsEmp
 		return 2;
 	}
 
+	/**
+	 * 获取当前处理的数据的行数
+	 * @return int|null
+	 */
 	public function getCurrentRow(): ?int
 	{
 		// 因为表头2行，ChunkSize 是 1000，ChunkOffset 为 3, 1003, 2003.....
-		// $this->current_row 为当前 Chunk 中的当前处理行数，非全部数据的行数
+		// $this->current_chunk_row 为当前 Chunk 中的当前处理行数，非全部数据的行数
 		//所以用 ChunkOffset  - 2行表头 + 当前处理行数 - 1 得到全部数据的行数
-		return $this->getChunkOffset() - $this->headingRow() + $this->current_row - 1;
+		return $this->getChunkOffset() - $this->headingRow() + $this->current_chunk_row - 1;
+	}
+
+	/**
+	 * 获取当前处理的数据的行数，用于显示在前端
+	 * @return int|null
+	 */
+	public function getDisplayCurrentRow(): ?int
+	{
+		return $this->getCurrentRow() + $this->headingRow();
 	}
 
 	public function map($row): array

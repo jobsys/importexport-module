@@ -32,6 +32,7 @@ return new class extends Migration {
 			$table->string('approval_comment')->nullable()->comment('审核备注');
 			$table->dateTime('approval_at')->nullable()->comment('审核时间');
 			$table->timestamps();
+			$table->comment('数据传输记录表');
 		});
 	}
 

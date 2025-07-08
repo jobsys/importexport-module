@@ -12,49 +12,52 @@ use Modules\Starter\Entities\BaseModel;
 
 class TransferRecord extends BaseModel implements ApprovableTarget
 {
-    use Approvable;
+	use Approvable;
 
-    protected $model_name = '文件传输';
-    protected $model_slug = 'transfer_record';
+	protected $model_name = '文件传输';
+	protected $model_slug = 'transfer_record';
 
-    const TYPE_IMPORT = 'import';
-    const TYPE_EXPORT = 'export';
+	const TYPE_IMPORT = 'import';
+	const TYPE_EXPORT = 'export';
 
-    const STATUS_PENDING = 'pending';
-    const STATUS_PROCESSING = 'processing';
-    const STATUS_DONE = 'done';
+	const STATUS_PENDING = 'pending';
+	const STATUS_PROCESSING = 'processing';
+	const STATUS_DONE = 'done';
+	const STATUS_FAILED = 'failed';
 
-    protected $casts = [
-        'properties' => 'array',
-        'approval_at' => 'datetime',
-        'started_at' => 'datetime',
-        'ended_at' => 'datetime'
-    ];
 
-    protected $accessors = [
-        'approval_at' => 'datetime',
-        'started_at' => 'datetime',
-        'ended_at' => 'datetime'
-    ];
+	protected $casts = [
+		'properties' => 'array',
+		'approval_at' => 'datetime',
+		'started_at' => 'datetime',
+		'ended_at' => 'datetime'
+	];
 
-    public function creator(): BelongsTo
-    {
-        return $this->belongsTo(User::class, 'creator_id');
-    }
+	protected $accessors = [
+		'approval_at' => 'datetime',
+		'started_at' => 'datetime',
+		'ended_at' => 'datetime'
+	];
 
-    public function approver(): BelongsTo
-    {
-        return $this->belongsTo(User::class, 'approver_id');
-    }
+	public function creator(): BelongsTo
+	{
+		return $this->belongsTo(User::class, 'creator_id');
+	}
 
-    public function getApproveTodoMessage(): string
-    {
-        $this->loadMissing(['creator:id,name,work_num']);
-        return "{$this->creator->name}（工号：{$this->creator->work_num}）导出任务：{$this->task_name}";
-    }
+	public function approver(): BelongsTo
+	{
+		return $this->belongsTo(User::class, 'approver_id');
+	}
 
-    public function getInitiator(): Authenticatable
-    {
-        return $this->creator;
-    }
+	public function getApproveTodoMessage(): string
+	{
+		$this->loadMissing(['creator:id,name,work_num']);
+		return "{$this->creator->name}（工号：{$this->creator->work_num}）导出任务：{$this->task_name}";
+	}
+
+	public function getInitiator(): ?Authenticatable
+	{
+		$this->loadMissing(['creator:id,name']);
+		return $this->creator;
+	}
 }
