@@ -2,10 +2,11 @@
 
 namespace Modules\Importexport\Exporters;
 
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Log;
 use Maatwebsite\Excel\Concerns\Exportable;
 use Maatwebsite\Excel\Concerns\FromQuery;
-use Maatwebsite\Excel\Concerns\RemembersChunkOffset;
 use Maatwebsite\Excel\Concerns\ShouldAutoSize;
 use Maatwebsite\Excel\Concerns\WithChunkReading;
 use Maatwebsite\Excel\Concerns\WithCustomValueBinder;
@@ -13,10 +14,12 @@ use Maatwebsite\Excel\Concerns\WithEvents;
 use Maatwebsite\Excel\Concerns\WithHeadings;
 use Maatwebsite\Excel\Concerns\WithMapping;
 use Maatwebsite\Excel\Concerns\WithStyles;
+use Maatwebsite\Excel\Events\AfterSheet;
 use Maatwebsite\Excel\Events\BeforeExport;
 use Modules\Importexport\Contracts\ExportMappings;
 use Modules\Importexport\Contracts\PrepareQuery;
 use Modules\Importexport\Entities\TransferRecord;
+use Modules\Importexport\Supports\ExportProgressRecorder;
 use Modules\Starter\Entities\BaseModel;
 use PhpOffice\PhpSpreadsheet\Cell\Cell;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
@@ -26,7 +29,7 @@ use Throwable;
 
 class QueryExporter extends DefaultValueBinder implements FromQuery, WithHeadings, WithMapping, WithEvents, WithChunkReading, ShouldAutoSize, WithStyles, ExportMappings, PrepareQuery, WithCustomValueBinder
 {
-	use Exportable, RemembersChunkOffset;
+	use Exportable;
 
 	protected string $id = '';
 	protected ?string $task_title = ''; // 任务标题
@@ -38,23 +41,19 @@ class QueryExporter extends DefaultValueBinder implements FromQuery, WithHeading
 
 	protected int $total_rows = 0;
 
-	protected int $current_chunk_row = 0;    //当前 Chunk 中的当前处理行数，非全部数据的行数， 当前总行数使用 getCurrentRow() 方法获取
 
-	protected TransferRecord $record;
+	protected ?TransferRecord $record;
 
-	public function __construct(string $export_id = '', ?TransferRecord $record = null, array $extra_data = [])
+	public function __construct($task_id, ?TransferRecord $record, array $extra_data = [])
 	{
-		$this->id = $export_id;
+		$this->id = $task_id;
 		$this->task_title = $record?->task_name;
+		$this->record = $record;
 		$task_properties = $record?->properties ?? [];
 		$this->fields = ($task_properties['approved_fields'] ?? ($task_properties['request_fields'] ?? []));
 		$this->params = $task_properties['params'] ?? [];
 		$this->mode = $task_properties['mode'] ?? '';
 		$this->extra_data = $extra_data;
-		if ($record) {
-			cache()->forever("title_{$this->id}", $this->task_title);
-			$this->record = $record;
-		}
 	}
 
 	/**
@@ -102,15 +101,7 @@ class QueryExporter extends DefaultValueBinder implements FromQuery, WithHeading
 	 */
 	public function map($row): array
 	{
-		$this->current_chunk_row += 1;
-		cache()->forever("current_row_{$this->id}", $this->getCurrentRow());
-		if ($this->getCurrentRow() === $this->total_rows) {
-			$this->record->status = TransferRecord::STATUS_DONE;
-			$this->record->ended_at = now();
-			$this->record->duration = gmdate('H:i:s', now()->diffInSeconds($this->record->started_at));
-			$this->record->save();
-			cache()->forever("end_date_{$this->id}", now()->unix());
-		}
+		(new ExportProgressRecorder($this->id))->incrementProcessed();
 		return collect($this->headings())->map(fn($key) => $this->mappings($row)[$key] ?? null)->toArray();
 	}
 
@@ -120,10 +111,7 @@ class QueryExporter extends DefaultValueBinder implements FromQuery, WithHeading
 	 */
 	public function getCurrentRow(): ?int
 	{
-		// 因为表头2行，ChunkSize 是 1000，ChunkOffset 为 3, 1003, 2003.....
-		// $this->current_chunk_row 为当前 Chunk 中的当前处理行数，非全部数据的行数
-		//所以用 ChunkOffset  - 2行表头 + 当前处理行数 - 1 得到全部数据的行数
-		return $this->getChunkOffset() + $this->current_chunk_row;
+		return (new ExportProgressRecorder($this->id))->getProcessed();
 	}
 
 
@@ -172,12 +160,26 @@ class QueryExporter extends DefaultValueBinder implements FromQuery, WithHeading
 			BeforeExport::class => function (BeforeExport $event) {
 				$total_rows = $this->query()->count();
 				$this->total_rows = $total_rows;
-				$this->record->status = TransferRecord::STATUS_PROCESSING;
-				$this->record->total_count = $total_rows;
-				$this->record->save();
-				cache()->forever("total_rows_{$this->id}", $total_rows);
-				cache()->forever("start_date_{$this->id}", now()->unix());
+
+				$this->record->update([
+					'status' => TransferRecord::STATUS_PROCESSING,
+					'started_at' => now(),
+					'total_count' => $total_rows,
+				]);
+
+				(new ExportProgressRecorder($this->id))->setTotal($total_rows);
+				(new ExportProgressRecorder($this->id))->setStart();
 			},
+			AfterSheet::class => function (AfterSheet $event) {
+				Log::info('Export done: ' . $this->id);
+				$start = (new ExportProgressRecorder($this->id))->getStart();
+				$this->record->update([
+					'status' => TransferRecord::STATUS_DONE,
+					'ended_at' => now(),
+					'duration' => gmdate('H:i:s', Carbon::createFromTimestamp($start)->diffInSeconds(Carbon::now())),
+				]);
+				(new ExportProgressRecorder($this->id))->refreshTTL();
+			}
 		];
 	}
 
@@ -188,9 +190,13 @@ class QueryExporter extends DefaultValueBinder implements FromQuery, WithHeading
 	 */
 	public function failed(Throwable $exception): void
 	{
-		TransferRecord::where('task_id', $this->id)->update([
+		Log::error('Export failed: ' . $this->id . ': ' . $exception->getMessage());
+		$this->record->update([
 			'status' => TransferRecord::STATUS_FAILED,
+			'ended_at' => now(),
+			'error' => $exception->getMessage(),
 		]);
+		(new ExportProgressRecorder($this->id))->setFailed(1);
 	}
 
 

@@ -91,13 +91,29 @@
 					</a-alert>
 					<div class="text-center mt-6! mb-3!">
 						<a-button @click="() => (state.visible = false)">关闭</a-button>
-						<a-button type="primary" class="ml-2 mt-5" :loading="state.isLoadingNext.loading" @click="nextStep"> 下载文件 </a-button>
+						<a-button type="primary" class="ml-2 mt-5" :loading="state.isLoadingNext.loading" @click="nextStep">
+							{{ state.downloadBtnText }}
+						</a-button>
 
 						<p class="mt-4 text-gray-500">
 							若数据量较大，或请求超时出错，可在
 							<Link :href="route('page.manager.tool.data-transfer')">系统工具 - 数据传输</Link>
 							中查看进度，并于任务完成后下载文件
 						</p>
+						<div class="flex items-center justify-center gap-4 my-8" v-if="state.totalRows">
+							<a-progress
+								class="flex-grow m-0!"
+								stroke-linecap="square"
+								:percent="state.progressPercent"
+								:status="state.progressStatus"
+							/>
+							<div class="w-[150px] shrink-0" v-if="state.totalRows">
+								<a-tag color="cyan"
+									>{{ state.processedRows || 0 }} /
+									{{ state.totalRows || 0 }}
+								</a-tag>
+							</div>
+						</div>
 					</div>
 				</div>
 			</div>
@@ -113,45 +129,15 @@ import { clone, isString } from "lodash-es"
 import { Link } from "@inertiajs/vue3"
 
 const props = defineProps({
-	width: {
-		type: Number,
-		default: 700,
-	},
-	url: {
-		// 上传URL
-		type: [String, Object],
-		default: "",
-	},
-	title: {
-		// 标题
-		type: String,
-		default: "",
-	},
-	tips: {
-		// 提示
-		type: Array,
-		default: () => [],
-	},
-	extraData: {
-		// 附加参数，只有 mode 为 query 时生效
-		type: Object,
-		default: () => ({}),
-	},
-	tableRef: {
-		// 表格实例
-		type: Object,
-		default: () => null,
-	},
-	modes: {
-		// 表格实例
-		type: [Array, String],
-		default: () => ["query", "selection", "page", "all"],
-	},
-	defaultFields: {
-		// 导出默认字段
-		type: Array,
-		default: () => [],
-	},
+	width: { type: Number, default: 700 },
+	url: { type: [String, Object], default: "" }, // 上传URL
+	title: { type: String, default: "" }, // 标题
+	tips: { type: Array, default: () => [] }, // 提示
+	extraData: { type: Object, default: () => ({}) }, // 附加参数，只有 mode 为 query 时生效
+	tableRef: { type: Object, default: () => null }, // 表格实例
+	modes: { type: [Array, String], default: () => ["query", "selection", "page", "all"] },
+	defaultFields: { type: Array, default: () => [] }, // 导出默认字段
+	progressUrl: { type: String, default: "" }, // 进度查询URL
 })
 
 const route = inject("route")
@@ -171,6 +157,15 @@ const state = reactive({
 	taskId: "",
 	approvalStatus: "approved",
 	downloadUrl: "",
+	progressFetcher: { loading: false },
+	checkTimes: 0,
+	checkInterval: null,
+	downloadBtnText: "下载文件",
+	processedRows: "",
+	totalRows: "",
+	progressPercent: 0,
+	progressStatus: "normal",
+	isFailed: false,
 })
 
 const availableModes = computed(() => {
@@ -199,6 +194,13 @@ const openExporter = () => {
 	state.visible = true
 	state.selectedMode = isTableEmpty.value ? "all" : "query"
 	state.stepNum = 1
+	state.progressFetcher.loading = false
+	state.progressPercent = 0
+	state.errorRows = 0
+	state.progressStatus = "normal"
+	state.downloadBtnText = "下载文件"
+	state.isFailed = false
+	state.taskId = ""
 }
 
 /**
@@ -247,7 +249,7 @@ const nextStep = async () => {
 			params,
 		})
 		useProcessStatusSuccess(res, () => {
-			state.taskId = res.result.export_id
+			state.taskId = res.result.task_id
 			state.approvalStatus = res.result.approval_status
 			state.stepNum = 3
 		})
@@ -259,11 +261,69 @@ const nextStep = async () => {
 			message.error("导出任务未通过审核，请耐心等待")
 			return
 		}
-
+		checkExportProgressInterval()
 		const res = await useFetch(state.isLoadingNext).post(props.url, { task_id: state.taskId })
 		useProcessStatusSuccess(res, () => {
+			state.downloadBtnText = "下载文件"
 			useHiddenForm({ url: res.result, data: {} }).submit()
 		})
+	}
+}
+
+const clearCheckInterval = () => {
+	clearInterval(state.checkInterval)
+	state.checkInterval = ""
+}
+
+const checkExportProgressInterval = () => {
+	if (!state.checkInterval) {
+		state.checkInterval = setInterval(checkExportProgress, 5000)
+	}
+}
+
+const checkExportProgress = async () => {
+	if (state.progressFetcher.loading) {
+		return
+	}
+
+	const progressUrl = props.progressUrl || route("api.manager.import-export.export.progress")
+
+	const res = await useFetch(state.progressFetcher).post(progressUrl, { ids: [state.taskId] })
+
+	const progress = res.result[0]
+
+	if (progress) {
+		state.checkTimes = 0
+		let isNeedCheckInterval = true
+
+		if (progress.status === "done") {
+			state.downloadBtnText = "写入文件"
+			state.progressStatus = "success"
+			state.progressPercent = progress.percentage
+			state.processedRows = progress.processed
+			clearCheckInterval()
+			isNeedCheckInterval = false
+		} else if (progress.status === "failed") {
+			state.downloadBtnText = "导出失败"
+			state.isFailed = true
+			state.progressStatus = "exception"
+			clearCheckInterval()
+			isNeedCheckInterval = false
+		} else {
+			state.downloadBtnText = "导出中"
+			state.progressStatus = "active"
+			state.processedRows = progress.processed
+			state.totalRows = progress.total
+			state.progressPercent = progress.percentage
+		}
+		if (isNeedCheckInterval && !state.checkInterval) {
+			checkExportProgressInterval()
+		}
+	} else {
+		if (state.checkTimes > 10) {
+			clearCheckInterval()
+		}
+		state.checkTimes += 1
 	}
 }
 

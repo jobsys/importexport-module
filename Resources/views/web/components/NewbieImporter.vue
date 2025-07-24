@@ -33,7 +33,7 @@
 					name="file"
 					:data="extraData"
 					:action="state.prepareUrl"
-					accept=".xls,.xlsx"
+					accept=".xls,.xlsx,.csv"
 					@change="uploadSuccessHandler"
 				>
 					<div class="p-5">
@@ -69,80 +69,66 @@
 			</div>
 		</div>
 
-		<div v-if="state.stepNum === 3" class="text-center mt-6">
-			<a-progress :percent="state.progressPercent || 0" type="circle" class="text-center">
-				<template #format="percent">
-					{{ state.progressText || (percent || 0) + "%" }}
-				</template>
+		<div v-if="state.stepNum >= 3" class="text-center my-12">
+			<a-progress :percent="state.progressPercent || 0" type="circle" class="text-center" :status="state.progressStatus">
+				<template #format> {{ state.progressText }}</template>
 			</a-progress>
-		</div>
 
-		<div v-if="state.stepNum === 4" class="text-center mt-6">
-			<a-progress :percent="100" type="circle" class="text-center">
-				<template #format="percent">
-					{{ state.progressText || (percent || 0) + "%" }}
-				</template>
-			</a-progress>
-			<div class="text-center text-gray-500 p-4 rounded">提示：请手动刷新页面或表格查看导入数据</div>
-
-			<div v-if="state.errorFile" class="text-left bg-gray-100 p-4 rounded">
-				<p class="mb-0">
-					<a-tag color="red"> {{ state.errorRows }}</a-tag>
-					条异常数据
-
-					<a :href="state.errorFile" class="mx-3 ant-btn ant-btn-danger" target="_blank">查看错误信息</a>，其余数据已正常导入
-				</p>
+			<div v-if="state.stepNum === 4" class="mt-4">
+				<a-alert
+					v-if="state.isFailed"
+					message="服务异常"
+					:description="`已导入【 ${state.processedRows}】 条数据，导入中断，请联系管理员。`"
+					type="error"
+					show-icon
+				/>
+				<div v-else-if="state.errorRows">
+					<div class="text-center text-gray-500 p-4 rounded">提示：请手动刷新页面或表格查看导入数据</div>
+					<div class="text-left bg-gray-100 p-4 rounded">
+						<p class="mb-0">
+							<a-tag color="red"> {{ state.errorRows }}</a-tag>
+							条异常数据，其余数据已正常导入。
+							<a-button class="p-0!" type="link" @click="onDownloadErrorFile" :icon="h(DownloadOutlined)"> 下载异常数据文件 </a-button>
+						</p>
+					</div>
+				</div>
+				<div v-else>
+					<a-alert
+						message="导入完成"
+						:description="`已导入 ${state.processedRows} 条数据，请手动刷新页面或表格查看导入数据。`"
+						type="success"
+					/>
+				</div>
 			</div>
 		</div>
 	</a-modal>
 </template>
 <script setup>
-import { computed, h, reactive } from "vue"
+import { computed, h, inject, reactive } from "vue"
 import { CloudUploadOutlined, DownloadOutlined } from "@ant-design/icons-vue"
 import { message, Tag } from "ant-design-vue"
-import { STATUS, useFetch, useProcessStatusSuccess } from "jobsys-newbie/hooks"
+import { STATUS, useFetch, useHiddenForm, useProcessStatusSuccess } from "jobsys-newbie/hooks"
 import { isObject } from "lodash-es"
 
 const { STATE_CODE_SUCCESS } = STATUS
 
 const props = defineProps({
-	url: {
-		type: [String, Object],
-		default: "",
-	},
-
-	templateUrl: {
-		//模板链接
-		type: String,
-		default: "",
-	},
-	progressUrl: {
-		type: String,
-		default: "",
-	},
-	errorUrl: {
-		type: String,
-		default: "",
-	},
-	title: {
-		type: String,
-		default: "",
-	},
-	tips: {
-		type: Array,
-		default: () => [],
-	},
-	extraData: {
-		type: Object,
-		default: () => ({}),
-	},
+	url: { type: [String, Object], default: "" },
+	templateUrl: { type: String, default: "" }, //模板链接
+	progressUrl: { type: String, default: "" },
+	errorUrl: { type: String, default: "" },
+	title: { type: String, default: "数据导入" },
+	tips: { type: Array, default: () => [] },
+	extraData: { type: Object, default: () => ({}) },
 })
+
+const route = inject("route")
 
 const state = reactive({
 	visible: false,
 	prepareUrl: isObject(props.url) ? props.url.prepareUrl : props.url,
 	importUrl: isObject(props.url) ? props.url.importUrl : props.url,
-	isCheckingProcess: { loading: false },
+	progressFetcher: { loading: false },
 	stepNum: 0,
 	checkTimes: 0,
 	fileList: [],
@@ -150,11 +136,14 @@ const state = reactive({
 	loading: false,
 	isLoadingNext: { loading: false },
 	uploadFileName: "",
-	importId: "",
-	errorFile: "",
+	taskId: "",
 	errorRows: "",
+	processedRows: "",
+	totalRows: "",
 	progressPercent: 0,
 	progressText: "",
+	progressStatus: "normal",
+	isFailed: false,
 	checkInterval: "",
 	tableOptions: [],
 	tableColumns: [
@@ -188,24 +177,33 @@ const uncachedTemplateUrl = computed(() => {
 
 const openImporter = () => {
 	state.visible = true
-	state.isCheckingProcess.loading = false
+	state.progressFetcher.loading = false
 	state.stepNum = 1
 	state.loading = false
 	state.isLoadingNext.loading = false
 	state.progressPercent = 0
+	state.errorRows = 0
 	state.progressText = ""
+	state.progressStatus = "normal"
 	state.uploadFileName = ""
-	state.importId = ""
+	state.isFailed = false
+	state.taskId = ""
 	state.tableOptions = []
 	state.mappingTable = []
 	state.fileList = []
-	state.errorFile = ""
 }
 
 /**
  * alias for openImporter
  */
 const open = () => openImporter()
+
+const onDownloadErrorFile = () => {
+	useHiddenForm({
+		url: route("api.manager.import-export.download-error-file"),
+		data: { task_id: state.taskId },
+	}).submit()
+}
 
 const checkUploadProgressInterval = () => {
 	if (!state.checkInterval) {
@@ -247,7 +245,7 @@ const nextStep = async () => {
 		}
 		const res = await useFetch(state.isLoadingNext).post(state.importUrl, { ...params, ...props.extraData })
 		useProcessStatusSuccess(res, () => {
-			state.importId = res.result.import_id
+			state.taskId = res.result.task_id
 			state.stepNum = 3
 			state.progressText = "预处理..."
 			checkUploadProgressInterval()
@@ -261,7 +259,7 @@ const uploadSuccessHandler = ({ file, fileList }) => {
 			message.error(file.response.result || "上传失败")
 			return
 		}
-		message.success("文件上传成功, 请设置匹配关系")
+		message.success("文件上传成功, 请设置表头匹配关系")
 		const { result } = file.response
 		state.uploadFileName = result.path
 		nextStep()
@@ -296,10 +294,13 @@ const clearCheckInterval = () => {
 }
 
 const checkUploadProgress = async () => {
-	if (state.isCheckingProcess.loading) {
+	if (state.progressFetcher.loading) {
 		return
 	}
-	const res = await useFetch(state.isCheckingProcess).post(props.progressUrl, { ids: [state.importId] })
+
+	const progressUrl = props.progressUrl || route("api.manager.import-export.import.progress")
+
+	const res = await useFetch(state.progressFetcher).post(progressUrl, { ids: [state.taskId] })
 
 	const progress = res.result[0]
 
@@ -307,18 +308,27 @@ const checkUploadProgress = async () => {
 		state.checkTimes = 0
 		let isNeedCheckInterval = true
 		if (state.stepNum === 3) {
-			state.progressText = ""
 			if (progress.error) {
-				state.errorFile = progress.error
-				state.errorRows = progress.error_rows
+				state.errorRows = progress.error
 			}
-			if (progress.current_row >= progress.total_rows) {
-				state.progressPercent = 100
+			state.progressStatus = "active"
+			state.processedRows = progress.processed
+			state.totalRows = progress.total
+			state.progressPercent = progress.percentage
+			state.progressText = `${progress.percentage}%`
+			if (progress.status === "done") {
+				state.progressStatus = "success"
+				state.progressPercent = progress.percentage
 				state.stepNum = 4
 				clearCheckInterval()
 				isNeedCheckInterval = false
-			} else {
-				state.progressPercent = parseFloat(((progress.current_row / progress.total_rows) * 100).toFixed(2))
+			} else if (progress.status === "failed") {
+				state.stepNum = 4
+				clearCheckInterval()
+				isNeedCheckInterval = false
+				state.isFailed = true
+				state.progressText = "导入中断"
+				state.progressStatus = "exception"
 			}
 		}
 		if (isNeedCheckInterval && !state.checkInterval) {

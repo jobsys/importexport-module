@@ -15,28 +15,20 @@ use Modules\Approval\Services\ApprovalService;
 use Modules\Importexport\Entities\TransferRecord;
 use Modules\Importexport\Exporters\QueryExporter;
 use Modules\Importexport\Importers\CollectionImporter;
-use PhpOffice\PhpSpreadsheet\Shared\Date;
 
 class ImportexportService
 {
 
 
 	/**
-	 * 检测模板文件是否符合要求
-	 * @param UploadedFile $file
+	 * 检测模板文件是否包含提示行
+	 * @param $file_path
 	 * @return bool
 	 */
-	public function checkTemplate(UploadedFile $file): bool
+	public function isTemplateContainTitleRow($file_path): bool
 	{
-		// 读取文件第一个单元格内容
-		$path = $file->storeAs('import', $this->createFilename($file), ['disk' => 'private']);
-
-		if (!$path) {
-			return false;
-		}
-
 		//第一行标题与注意问题
-		$headings = (new HeadingRowImport(1))->toArray($this->getFileStoragePath($path));
+		$headings = (new HeadingRowImport(1))->toArray($file_path);
 		$first_cell = $headings[0][0][0] ?? null;
 
 		if (!$first_cell) {
@@ -44,7 +36,7 @@ class ImportexportService
 		}
 
 		if (config('conf.system_name')) {
-			return Str::contains(trim($first_cell), config('conf.system_name'));
+			return Str::contains(trim($first_cell), config('conf.system_name')) || Str::contains(trim($first_cell), '导入模板');
 		}
 		return Str::contains(trim($first_cell), '导入模板');
 	}
@@ -63,9 +55,12 @@ class ImportexportService
 			return [null, '文件上传失败'];
 		}
 
+		$file_path = $this->getFileStoragePath($path);
 
-		//第二行为表头，第一行为标题与注意问题
-		$headings = (new HeadingRowImport(2))->toArray($this->getFileStoragePath($path));
+		$is_contain_title = $this->isTemplateContainTitleRow($file_path);
+
+		//如果包含提示行则从第二行读，否则从第一行读
+		$headings = (new HeadingRowImport($is_contain_title ? 2 : 1))->toArray($file_path);
 
 		return [['path' => $path, 'headers' => $headings[0][0] ?? []], null];
 	}
@@ -101,7 +96,7 @@ class ImportexportService
 			if (isset($field['type'])) {
 				switch ($field['type']) {
 					case 'date':
-						$row[$header] = Date::excelToDateTimeObject($row[$header] ?? '');
+						$row[$header] = land_excel_date($row[$header] ?? null);
 						break;
 					default:
 						break;
@@ -112,32 +107,28 @@ class ImportexportService
 		return $result;
 	}
 
-	/**
-	 * 记录导入错误日志
-	 * @param $import_id
-	 * @param $row
-	 * @param $message
-	 * @return void
+	/*
+	 * 将数据整理成导入时的原始数据格式，主要是为了生成错误信息的导出文件
 	 */
-	public function importLog($import_id, $row, $message): void
+	public function tidyImportOriginContent($fields, $headers, $row): array
 	{
-		$dir_path = storage_path("app/public/import");
+		$result = [];
+		foreach ($headers as $index => $header) {
 
-		if (!is_dir($dir_path)) {
-			mkdir($dir_path);
-		}
-		$path = "import/{$import_id}.csv";
+			$field = $fields[$index] ?? null;
 
-		$file_path = storage_path("app/public/{$path}");
-		$file = fopen($file_path, "a+");
-		fprintf($file, chr(0xEF) . chr(0xBB) . chr(0xBF));
-		if (!Storage::exists($path)) {
-			$header = ['行数', '错误信息'];
-			@fputcsv($file, $header);
+			if (isset($field['type'])) {
+				switch ($field['type']) {
+					case 'date':
+						$row[$field['field']] = !empty($row[$field['field']]) ? $row[$field['field']]->format('Y-m-d') : null;
+						break;
+					default:
+						break;
+				}
+			}
+			$result[] = $row[$field['field']] ?? null;
 		}
-		$content = ["第{$row}行", $message];
-		@fputcsv($file, $content);
-		@fclose($file);
+		return $result;
 	}
 
 	/**
@@ -151,17 +142,13 @@ class ImportexportService
 	public function import(string $title, string $importer_class, array $fields, array $extra_data = []): array
 	{
 
-		$title = $title . '_' . now()->format('Y_m_d');
+		$title = $title . '_' . now()->format('Ymdhi') . '_' . Str::random(8);
 
 		$file = request()->file('file');
 		$path = request()->input('path');
 		$headers = request()->input('headers');
 
 		if ($file) {
-			if (!$this->checkTemplate($file)) {
-				return [null, '文件模板不符合要求，请下载导入模板并重新上传'];
-			}
-
 			list($result, $error) = $this->readHeaders($file);
 			if ($error) {
 				return [null, $error];
@@ -172,12 +159,12 @@ class ImportexportService
 			];
 		} else if ($path) {
 			$storage_path = $this->getFileStoragePath($path);
-			$import_id = uuid_create();
-			TransferRecord::create([
-				'task_id' => $import_id,
+			$task_id = uuid_create();
+			$record = TransferRecord::create([
+				'task_id' => $task_id,
 				'task_name' => $title,
 				'class_name' => $importer_class,
-				'creator_id' => request()->user()->id,
+				'creator_id' => auth()->id(),
 				'type' => TransferRecord::TYPE_IMPORT,
 				'status' => TransferRecord::STATUS_PENDING,
 				'file_path' => $path,
@@ -185,49 +172,20 @@ class ImportexportService
 			/**
 			 * @var CollectionImporter $importer
 			 */
-			$importer = new $importer_class($import_id, $title, $fields, $headers, $extra_data, request()->user(), $storage_path);
+			$importer = new $importer_class($record, $fields, $headers, $extra_data, $storage_path);
 			$importer->import($storage_path)->chain([
-				new NotifyUserOfCompletedImport("{$title}完成", $import_id, request()->user())
+				new NotifyUserOfCompletedImport("{$title}完成", $task_id, auth()->user())
 			]);
-			return [compact('import_id'), null];
+			return [compact('task_id'), null];
 		}
 		return [null, '文件上传异常'];
 	}
 
 	/**
-	 * 获取导入进度
-	 * @param $id
-	 * @return array
-	 */
-	public function getImportProgress($id): array
-	{
-		return [
-			'title' => cache("title_$id"),
-			'started' => cache("start_date_$id"),
-			'finished' => cache("end_date_$id"),
-			'current_row' => (int)cache("current_row_$id"),
-			'total_rows' => (int)cache("total_rows_$id"),
-			'error' => filled(cache("error_$id")) ? Storage::url("import/$id.csv") : null,
-			'error_rows' => (int)cache("error_rows_$id"),
-		];
-	}
-
-	public function getExportProgress($task_id): array
-	{
-		return [
-			'title' => cache("title_$task_id"),
-			'started' => cache("start_date_$task_id"),
-			'finished' => cache("end_date_$task_id"),
-			'current_row' => (int)cache("current_row_$task_id"),
-			'total_rows' => (int)cache("total_rows_$task_id"),
-		];
-	}
-
-
-	/**
 	 * 导出数据
 	 * @param string $title
 	 * @param string $exporter_class
+	 * @param array $extra_data
 	 * @return array
 	 */
 	public function export(string $title, string $exporter_class, array $extra_data = []): array
@@ -265,11 +223,12 @@ class ImportexportService
 	/**
 	 * 根据 Exporter 提取 Headers
 	 * @param $exporter_class
+	 * @param array $extra_data
 	 * @return array
 	 */
-	public function exportExtractHeaders($exporter_class, $extra_data = []): array
+	public function exportExtractHeaders($exporter_class, array $extra_data = []): array
 	{
-		$exporter = app($exporter_class, ['export_id' => '', 'record' => null, 'extra_data' => $extra_data]);
+		$exporter = app($exporter_class, ['task_id' => '', 'record' => null, 'extra_data' => $extra_data]);
 		return [$exporter->headings(), null];
 	}
 
@@ -278,21 +237,22 @@ class ImportexportService
 	 * 创建导出任务
 	 * @param $title
 	 * @param $exporter_class
+	 * @param array $extra_data
 	 * @return array
 	 */
-	public function exportCreateTask($title, $exporter_class, $extra_data = []): array
+	public function exportCreateTask($title, $exporter_class, array $extra_data = []): array
 	{
-		$current_user = request()->user();
-		$title = $title . '_' . now()->format('Ymdhi');;
+		$current_user = auth()->user();
+		$title = $title . '_' . now()->format('Ymdhi') . '_' . Str::random(8);
 
 
 		//是否需要审核
 		$should_approve = in_array(TransferRecord::class, collect(config('approval.approvables'))->firstWhere('slug', 'transfer-record')['children'] ?? []);
 
-		$export_id = uuid_create();
+		$task_id = uuid_create();
 
 		$record = TransferRecord::create([
-			'task_id' => $export_id,
+			'task_id' => $task_id,
 			'task_name' => $title,
 			'creator_id' => $current_user->id,
 			'class_name' => $exporter_class,
@@ -306,21 +266,20 @@ class ImportexportService
 		]);
 
 		if ($should_approve) {
-			$approvalService = app()->make(ApprovalService::class);
+			$approvalService = app(ApprovalService::class);
 			list($result, $error) = $approvalService->createApprovalTask($record);
 			if ($error) {
 				return [null, $error];
 			}
 			$record->approval_status = ApprovalStatus::Pending;
-			$record->save();
 		} else {
 			$record->approval_status = ApprovalStatus::Approved;
 			$record->approval_comment = '无需审核';
 			$record->approval_at = Carbon::now();
-			$record->save();
 		}
+		$record->save();
 
-		return [['export_id' => $export_id, 'approval_status' => $record->approval_status], null];
+		return [['task_id' => $task_id, 'approval_status' => $record->approval_status], null];
 	}
 
 
@@ -333,7 +292,9 @@ class ImportexportService
 	public function exportDownloadFile($task_id, array $extra_data = []): array
 	{
 
-		$current_user = request()->user();
+		set_time_limit(0);
+
+		$current_user = auth()->user();
 
 		$record = TransferRecord::where('task_id', $task_id)->first();
 
@@ -351,15 +312,13 @@ class ImportexportService
 
 		$file_name = $this->exportCreateFileName($record->task_name);
 		$file_path = "export/{$file_name}";
-		$record->started_at = now();
 		$record->file_path = $file_path;
-
 		$exporter_class = $record->class_name;
 
 		/**
 		 * @var QueryExporter $exporter
 		 */
-		$exporter = app($exporter_class, ['export_id' => $task_id, 'record' => $record, 'extra_data' => $extra_data]);
+		$exporter = app($exporter_class, ['task_id' => $task_id, 'record' => $record, 'extra_data' => $extra_data]);
 
 		$exporter->store($file_path, 'private');
 

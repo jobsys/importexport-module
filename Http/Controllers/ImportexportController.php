@@ -8,6 +8,8 @@ use Illuminate\Http\Request;
 use Modules\Approval\Services\ApprovalService;
 use Modules\Importexport\Entities\TransferRecord;
 use Modules\Importexport\Services\ImportexportService;
+use Modules\Importexport\Supports\ExportProgressRecorder;
+use Modules\Importexport\Supports\ImportProgressRecorder;
 
 class ImportexportController extends BaseManagerController
 {
@@ -16,31 +18,29 @@ class ImportexportController extends BaseManagerController
 	{
 		$mode = request('mode');
 
-		$is_admin = request()->user()->isSuperAdmin();
+		$is_admin = auth()->user()->isSuperAdmin();
 
 		$is_super_admin = auth()->id() === config('conf.super_admin_id');
 
 		$pagination = TransferRecord::with(['creator:id,name'])
 			->where('status', '<>', TransferRecord::STATUS_PENDING)
 			->when(!$is_super_admin, fn($query) => $query->where('creator_id', '<>', config('conf.super_admin_id')))
-			->when(!$is_admin, fn($query) => $query->where('creator_id', request()->user()->id)
+			->when(!$is_admin, fn($query) => $query->where('creator_id', auth()->user()->id)
 			)->when($mode, function ($query) use ($mode) {
 				$query->where('type', $mode);
 			})->latest()->paginate();
 
 
 		$approvalService = app(ApprovalService::class);
-		$importexportService = app(ImportexportService::class);
 
-		$pagination->transform(function (TransferRecord $item) use ($approvalService, $importexportService) {
-			if ($item->type === TransferRecord::TYPE_IMPORT) {
-				return $item;
+		$pagination->transform(function (TransferRecord $item) use ($approvalService) {
+			if ($item->status !== TransferRecord::STATUS_DONE && $item->status !== TransferRecord::STATUS_FAILED) {
+				if ($item->type === TransferRecord::TYPE_IMPORT) {
+					$item->{'progress'} = (new ImportProgressRecorder($item->task_id))->getProgress();
+				} else {
+					$item->{'progress'} = (new ExportProgressRecorder($item->task_id))->getProgress();
+				}
 			}
-
-			if ($item->status === TransferRecord::STATUS_PROCESSING) {
-				$item->{'progress'} = $importexportService->getExportProgress($item->task_id);
-			}
-
 
 			if (!in_array(TransferRecord::class, collect(config('approval.approvables'))->firstWhere('slug', 'transfer-record')['children'] ?? [])) {
 				return $item;
@@ -82,11 +82,11 @@ class ImportexportController extends BaseManagerController
 		return $this->message('无审核权限');
 	}
 
-	public function download(ImportexportService $importexportService)
+	public function download(ImportexportService $service)
 	{
 		$task_id = request('task_id');
 
-		if (request()->user()->isSuperAdmin()) {
+		if (auth()->user()->isSuperAdmin()) {
 			$record = TransferRecord::where('task_id', $task_id)->first();
 		} else {
 			$record = TransferRecord::where('creator_id', auth()->id())->where('task_id', $task_id)->first();
@@ -100,17 +100,34 @@ class ImportexportController extends BaseManagerController
 			return $this->message('文件不存在');
 		}
 
-		if ($record->type === TransferRecord::TYPE_IMPORT) {
-			return response()->download(storage_path('app/private/' . $record->file_path));
-		}
-
-
-		[$file_path, $error] = $importexportService->exportDownloadFile($task_id);
-
-		return response()->download(storage_path('app/private/' . $file_path));
+		return response()->download($service->getFileStoragePath($record->file_path));
 	}
 
-	public function importProgress(Request $request, ImportexportService $service)
+
+	public function downloadErrorFile(ImportexportService $service)
+	{
+		$task_id = request('task_id');
+
+		if (auth()->user()->isSuperAdmin()) {
+			$record = TransferRecord::where('task_id', $task_id)->first();
+		} else {
+			$record = TransferRecord::where('creator_id', auth()->id())->where('task_id', $task_id)->first();
+		}
+
+		if (!$record) {
+			return $this->message('任务记录不存在');
+		}
+
+		if (!$record->error_file_path) {
+			return $this->message('无错误文件');
+		}
+
+		return response()->download($service->getFileStoragePath($record->error_file_path));
+
+	}
+
+
+	public function importProgress(Request $request)
 	{
 		$ids = $request->input('ids');
 
@@ -121,12 +138,12 @@ class ImportexportController extends BaseManagerController
 		$result = [];
 
 		foreach ($ids as $id) {
-			$result[] = $service->getImportProgress($id);
+			$result[] = (new ImportProgressRecorder($id))->getProgress();
 		}
 		return $this->json($result);
 	}
 
-	public function exportProgress(Request $request, ImportexportService $service)
+	public function exportProgress(Request $request)
 	{
 		$ids = $request->input('ids');
 
@@ -137,7 +154,7 @@ class ImportexportController extends BaseManagerController
 		$result = [];
 
 		foreach ($ids as $id) {
-			$result[] = $service->getExportProgress($id);
+			$result[] = (new ExportProgressRecorder($id))->getProgress();
 		}
 		return $this->json($result);
 	}
